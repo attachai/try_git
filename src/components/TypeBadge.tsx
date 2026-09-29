@@ -1,24 +1,6 @@
-// Icon + Thai name for each element type. Colors live in styles.css as .element-<type>.
-export const TYPE_INFO: Record<string, { icon: string; th: string }> = {
-  Normal: { icon: "⚪", th: "ปกติ" },
-  Fire: { icon: "🔥", th: "ไฟ" },
-  Water: { icon: "💧", th: "น้ำ" },
-  Grass: { icon: "🌿", th: "หญ้า" },
-  Electric: { icon: "⚡", th: "ไฟฟ้า" },
-  Ice: { icon: "❄️", th: "น้ำแข็ง" },
-  Fighting: { icon: "🥊", th: "ต่อสู้" },
-  Poison: { icon: "☠️", th: "พิษ" },
-  Ground: { icon: "⛰️", th: "ดิน" },
-  Flying: { icon: "🕊️", th: "บิน" },
-  Psychic: { icon: "🔮", th: "พลังจิต" },
-  Bug: { icon: "🐛", th: "แมลง" },
-  Rock: { icon: "🪨", th: "หิน" },
-  Ghost: { icon: "👻", th: "ผี" },
-  Dragon: { icon: "🐉", th: "มังกร" },
-  Dark: { icon: "🌙", th: "ความมืด" },
-  Steel: { icon: "⚙️", th: "เหล็ก" },
-  Fairy: { icon: "🧚", th: "แฟรี่" },
-};
+import { TYPE_INFO } from "../../shared/types";
+
+export { TYPE_INFO };
 
 // e.g. "💧 ธาตุน้ำ"
 export function typeLabel(type: string) {

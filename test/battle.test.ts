@@ -3,11 +3,11 @@ import { baseDamage, computeStats, STAT_MAX, strongAgainst, typeMultiplier, weak
 
 describe("battle stats", () => {
   it("matches the design examples", () => {
-    expect(computeStats({ rarity: "COMMON", type_primary: "Fire" })).toEqual({ hp: 80, atk: 25, def: 8, eva: 6, crit: 12 });
-    expect(computeStats({ rarity: "EPIC", type_primary: "Fire" })).toEqual({ hp: 104, atk: 33, def: 10, eva: 8, crit: 14 });
-    expect(computeStats({ rarity: "COMMON", type_primary: "Rock" })).toEqual({ hp: 96, atk: 18, def: 15, eva: 4, crit: 6 });
-    expect(computeStats({ rarity: "RARE", type_primary: "Electric" })).toEqual({ hp: 78, atk: 24, def: 9, eva: 17, crit: 15 });
-    expect(computeStats({ rarity: "LEGENDARY", type_primary: "Psychic" })).toEqual({ hp: 104, atk: 32, def: 13, eva: 13, crit: 23 });
+    expect(computeStats({ rarity: "COMMON", type_primary: "Fire" })).toEqual({ hp: 100, atk: 25, def: 8, eva: 6, crit: 12 });
+    expect(computeStats({ rarity: "EPIC", type_primary: "Fire" })).toEqual({ hp: 130, atk: 33, def: 10, eva: 8, crit: 14 });
+    expect(computeStats({ rarity: "COMMON", type_primary: "Rock" })).toEqual({ hp: 120, atk: 18, def: 15, eva: 4, crit: 6 });
+    expect(computeStats({ rarity: "RARE", type_primary: "Electric" })).toEqual({ hp: 98, atk: 24, def: 9, eva: 17, crit: 15 });
+    expect(computeStats({ rarity: "LEGENDARY", type_primary: "Psychic" })).toEqual({ hp: 131, atk: 32, def: 13, eva: 13, crit: 23 });
   });
 
   it("keeps every combo within the bar maximums", () => {
@@ -21,7 +21,7 @@ describe("battle stats", () => {
     }
   });
 
-  it("takes 2 to 7 plain hits to knock out a same-rarity monster", () => {
+  it("takes 2 to 8 plain hits to knock out a same-rarity monster", () => {
     const types = ["Rock", "Fire", "Electric", "Psychic", "Water"];
     for (const rarity of ["COMMON", "RARE", "EPIC", "LEGENDARY"]) {
       for (const a of types) {
@@ -30,7 +30,7 @@ describe("battle stats", () => {
           const defender = computeStats({ rarity, type_primary: d });
           const hits = Math.ceil(defender.hp / baseDamage(attacker.atk, defender.def, 1, 0.5, false));
           expect(hits).toBeGreaterThanOrEqual(2);
-          expect(hits).toBeLessThanOrEqual(7);
+          expect(hits).toBeLessThanOrEqual(8);
         }
       }
     }

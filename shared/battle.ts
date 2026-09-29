@@ -4,8 +4,9 @@
 export type Stats = { hp: number; atk: number; def: number; eva: number; crit: number };
 export type Archetype = "tank" | "striker" | "agile" | "crit" | "balanced";
 
-// Neutral monster before archetype and rarity. eva/crit are percentages.
-const BASE: Stats = { hp: 80, atk: 20, def: 10, eva: 8, crit: 10 };
+// Neutral monster before archetype and rarity. eva/crit are percentages. HP 100 keeps a
+// COMMON 3v3 at a median of ~17 turns in simulation (see docs/ARENA.md).
+const BASE: Stats = { hp: 100, atk: 20, def: 10, eva: 8, crit: 10 };
 
 // hp/atk/def are multipliers; eva/crit replace the base percentage.
 const ARCHETYPES: Record<Archetype, { label: string; hp: number; atk: number; def: number; eva: number; crit: number }> = {
@@ -32,7 +33,7 @@ const RARITY: Record<string, { scale: number; bonus: number }> = {
 };
 
 // Upper ends of each stat across all archetype/rarity combos, for drawing bars.
-export const STAT_MAX: Stats = { hp: 140, atk: 36, def: 22, eva: 20, crit: 25 };
+export const STAT_MAX: Stats = { hp: 175, atk: 36, def: 22, eva: 20, crit: 25 };
 
 export function archetypeOf(typePrimary: string): Archetype {
   return TYPE_ARCHETYPE[typePrimary] ?? "balanced";
