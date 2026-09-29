@@ -1,6 +1,8 @@
-export interface Env {
-  DB: D1Database;
-}
+import { authRoutes } from "./routes/auth";
+import { childrenRoutes } from "./routes/children";
+import { pointsRoutes } from "./routes/points";
+import type { Env } from "./types";
+import { error, json } from "./lib/http";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -8,9 +10,21 @@ export default {
 
     if (url.pathname === "/api/health") {
       const row = await env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
-      return Response.json({ ok: row?.ok === 1, service: "family-reward-game" });
+      return json({ ok: row?.ok === 1, service: "family-reward-game" });
     }
 
-    return new Response("Not Found", { status: 404 });
+    if (url.pathname.startsWith("/api/auth/")) {
+      return (await authRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    }
+
+    if (url.pathname === "/api/children" || url.pathname === "/api/child/me") {
+      return (await childrenRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    }
+
+    if (url.pathname === "/api/points" || url.pathname.includes("/history")) {
+      return (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    }
+
+    return error(404, "NOT_FOUND", "Not found.");
   },
 } satisfies ExportedHandler<Env>;
