@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfirmDialog from "./components/ConfirmDialog";
 import ProfileLogin from "./components/ProfileLogin";
 import QuestBoard from "./components/QuestBoard";
+import GachaBox from "./components/GachaBox";
 import { api } from "./lib/api";
 import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
 
@@ -704,6 +705,10 @@ export default function App() {
                   </div>
                 )}
               </section>
+            )}
+
+            {isChild && childTab === "shop" && (
+              <GachaBox balance={activeChild.points_balance} onChanged={refreshChildGame} />
             )}
 
             {isChild && childTab === "shop" && (

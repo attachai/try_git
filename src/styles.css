@@ -203,3 +203,24 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .quest-state.pending { color: #b45309; }
 .idea-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
 .idea-chip { border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: #334155; }
+.gacha-panel { text-align: center; }
+.gacha-panel .section-heading { text-align: left; }
+.gacha-box { font-size: 72px; line-height: 1; margin: 8px 0 4px; display: inline-block; }
+.gacha-box.opening { animation: gacha-shake .35s ease-in-out infinite; }
+@keyframes gacha-shake { 0%, 100% { transform: rotate(0) scale(1); } 25% { transform: rotate(-12deg) scale(1.08); } 75% { transform: rotate(12deg) scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { .gacha-box.opening { animation: none; opacity: .6; } }
+.gacha-note { margin: 0 0 10px; }
+.odds-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 14px; }
+.gacha-button { width: 100%; background: linear-gradient(135deg, #f59e0b, #ec4899); }
+.gacha-button:disabled { background: #cbd5e1; color: #475569; opacity: 1; }
+.gacha-confirm p { margin: 0 0 4px; font-weight: 800; }
+.gacha-reveal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, .55); }
+.gacha-card { width: min(100%, 340px); display: grid; justify-items: center; gap: 8px; padding: 24px; border-radius: 28px; background: white; animation: gacha-pop .45s cubic-bezier(.2, 1.4, .4, 1); }
+.gacha-card img { width: 180px; height: 180px; object-fit: contain; }
+.gacha-card h2 { margin: 0; }
+.gacha-card .submit-button { width: 100%; margin-top: 8px; }
+.rarity-glow-rare { box-shadow: 0 0 0 3px #93c5fd, 0 20px 60px rgba(59, 130, 246, .35); }
+.rarity-glow-epic { box-shadow: 0 0 0 3px #c084fc, 0 20px 60px rgba(168, 85, 247, .45); }
+.rarity-glow-legendary { box-shadow: 0 0 0 3px #f59e0b, 0 20px 70px rgba(245, 158, 11, .6); }
+@keyframes gacha-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .gacha-card { animation: none; } }

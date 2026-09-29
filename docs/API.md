@@ -102,6 +102,15 @@ Parents define repeatable quests for one child or every child in a family. Days 
 
 Approval inserts an `EARN` ledger row with `reference_type = 'QUEST'`. A streak day is any day with at least one approved quest. Reaching 3, 7, 14 or 30 days in a row pays +20, +50, +100 or +200 as a `STREAK` ledger row. A unique index on `(reference_type, reference_id)` makes each quest completion and each streak day pay out once.
 
+## Mystery box (กล่องสุ่ม)
+
+Child only. A spin costs 400 points, is limited to 3 per child per Thailand-time day, and always grants a shop character (`price > 0`) the child doesn't own, so there are no duplicates and no evolved forms. Rarity weights are COMMON 60, RARE 30, EPIC 9, LEGENDARY 1. Rarities with nothing left are skipped and the rest renormalized, and `GET /api/gacha` returns those effective odds.
+
+- `GET /api/gacha`: `price`, `daily_limit`, `spins_today`, `pool_size`, `odds`
+- `POST /api/gacha/spin`: `201 { character }`. Returns `429 DAILY_LIMIT`, `409 POOL_EMPTY`, `409 INSUFFICIENT_POINTS`, or `409 TRY_AGAIN` (a concurrent spin took the character; nothing was charged)
+
+A spin atomically writes a `PURCHASE` ledger row (`reference_type = 'GACHA'`), the owned character, and a `gacha_spins` audit row.
+
 ## Error shape
 
 ```json
