@@ -9,7 +9,7 @@ INSERT INTO family_members (id, family_id, user_id, relation) VALUES
   ('fm_child', 'fam_demo', 'usr_child', 'CHILD');
 
 INSERT INTO children (id, family_id, user_id, display_name, points_balance)
-VALUES ('child_demo', 'fam_demo', 'usr_child', 'Nong Demo', 2000);
+VALUES ('child_demo', 'fam_demo', 'usr_child', 'Nong Demo', 1880);
 
 INSERT INTO characters (id, external_id, name, slug, type_primary, type_secondary, image_url, price, rarity) VALUES
   ('char_pikachu', '25', 'Pikachu', 'pikachu', 'Electric', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png', 500, 'RARE'),
