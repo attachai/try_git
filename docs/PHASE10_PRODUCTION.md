@@ -38,6 +38,7 @@ Add these environment secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_D1_DATABASE_ID`
 - `CLOUDFLARE_PRODUCTION_URL`
+- `BOOTSTRAP_SECRET`
 
 Recommended: configure required reviewers on the production environment so deployment requires explicit approval.
 
@@ -68,7 +69,8 @@ The workflow performs:
 6. render production Wrangler config
 7. apply remote D1 migrations
 8. deploy Worker + static assets
-9. smoke test /api/health and application root
+9. configure the one-time bootstrap secret
+10. smoke test /api/health and application root
 
 ## Production config safety
 
@@ -84,13 +86,13 @@ The D1 ID is injected from GitHub Secrets and the generated file is not committe
 
 Do not expose the application publicly with demo authentication.
 
-Before first real family use, implement one of:
+Production credential authentication is now implemented:
 
-- parent email/password + child PIN
-- parent passkey + child PIN
-- parent magic link + child PIN
+- parent: email + password
+- child: Family Code + child name + 4–8 digit PIN
+- credentials stored as salted PBKDF2-SHA256 hashes
 
-For this family-oriented application, parent passkey/password plus a short child PIN is the preferred next implementation because the child does not need an email account.
+After the first deployment, call the one-time bootstrap endpoint described in docs/AUTH.md to create the first family. Rotate or remove BOOTSTRAP_SECRET after bootstrap.
 
 ## Artwork gate
 
