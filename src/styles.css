@@ -130,3 +130,11 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
   .stat-card { padding: 14px 6px; }
   .stat-card strong { font-size: 20px; }
 }
+
+.login-role-tabs { margin: 20px 0 16px; }
+.login-form { display: grid; gap: 14px; }
+.login-form label { display: grid; gap: 7px; font-weight: 800; }
+.login-form input { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 13px 14px; background: white; color: #0f172a; outline: none; }
+.login-form input:focus { border-color: #818cf8; box-shadow: 0 0 0 4px rgba(99,102,241,.12); }
+.demo-login-box { margin-top: 22px; padding-top: 18px; border-top: 1px dashed #cbd5e1; }
+.demo-login-box > p { margin-bottom: 10px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
