@@ -18,6 +18,10 @@ function cookieValue(request: Request, name: string) {
   return null;
 }
 
+function cookieSecurity(env: Env) {
+  return env.ENVIRONMENT === "production" ? "; Secure" : "";
+}
+
 export async function getSessionUser(request: Request, env: Env): Promise<SessionUser | null> {
   const sessionId = cookieValue(request, COOKIE_NAME);
   if (!sessionId) return null;
@@ -39,12 +43,12 @@ export async function createSession(env: Env, userId: string) {
 
   return {
     id,
-    cookie: `${COOKIE_NAME}=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`,
+    cookie: `${COOKIE_NAME}=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${cookieSecurity(env)}`,
   };
 }
 
 export async function destroySession(request: Request, env: Env) {
   const id = cookieValue(request, COOKIE_NAME);
   if (id) await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(id).run();
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieSecurity(env)}`;
 }
