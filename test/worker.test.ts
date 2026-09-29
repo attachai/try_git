@@ -445,3 +445,58 @@ describe("mystery box", () => {
     expect((await post("/api/gacha/spin", await sessionCookie("parent"), {})).status).toBe(403);
   });
 });
+
+describe("pokedex", () => {
+  type Dex = {
+    total: number; registered: number;
+    entries: { id: string; registered: number; evolves_from: string | null }[];
+    sets: { set: string; total: number; registered: number; bonus: number; claimed: boolean }[];
+  };
+
+  async function dex(cookie: string) {
+    return await (await SELF.fetch("https://example.test/api/pokedex", { headers: { cookie } })).json() as Dex;
+  }
+
+  async function balance() {
+    return (await env.DB.prepare("SELECT points_balance FROM children WHERE id = 'child'").first<{ points_balance: number }>())!.points_balance;
+  }
+
+  it("counts evolved-away forms as registered and shows how to get each one", async () => {
+    const kid = await sessionCookie("child-user");
+    expect((await dex(kid)).registered).toBe(0);
+
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    await post("/api/collection/evolve", kid, { childCharacterId: owned!.id });
+
+    const after = await dex(kid);
+    expect(after).toMatchObject({ total: 2, registered: 2 });
+    expect(after.entries.find((e) => e.id === "evolved")?.evolves_from).toBe("Starter");
+  });
+
+  it("pays a complete set once and refuses an incomplete one", async () => {
+    const kid = await sessionCookie("child-user");
+    expect((await post("/api/pokedex/claim", kid, { set: "Fire" })).status).toBe(409);
+
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    await post("/api/collection/evolve", kid, { childCharacterId: owned!.id });
+    const before = await balance();
+
+    const claim = await post("/api/pokedex/claim", kid, { set: "Fire" });
+    expect(claim.status).toBe(201);
+    expect(await balance()).toBe(before + 2 * 30);
+    expect((await post("/api/pokedex/claim", kid, { set: "Fire" })).status).toBe(409);
+
+    expect((await post("/api/pokedex/claim", kid, { set: "ALL" })).status).toBe(201);
+    expect(await balance()).toBe(before + 60 + 1000);
+
+    const sets = (await dex(kid)).sets;
+    expect(sets.find((s) => s.set === "Fire")).toMatchObject({ claimed: true, registered: 2, total: 2 });
+    expect((await post("/api/pokedex/claim", kid, { set: "Nope" })).status).toBe(404);
+  });
+
+  it("is only for children", async () => {
+    expect((await post("/api/pokedex/claim", await sessionCookie("parent"), { set: "Fire" })).status).toBe(403);
+  });
+});

@@ -111,6 +111,15 @@ Child only. A spin costs 400 points, is limited to 3 per child per Thailand-time
 
 A spin atomically writes a `PURCHASE` ledger row (`reference_type = 'GACHA'`), the owned character, and a `gacha_spins` audit row.
 
+## Pokédex (สมุดสะสม)
+
+Child only. A character counts as registered once the child has ever had it, including forms they've since evolved.
+
+- `GET /api/pokedex`: `total`, `registered`, `entries` (every active character in dex order, with `registered` and `evolves_from` so the UI can say how to get it), and `sets`
+- `POST /api/pokedex/claim` `{ set }`: pays a completed set's bonus once. Returns `409 SET_INCOMPLETE` or `409 ALREADY_CLAIMED`
+
+A set is every active character sharing a `type_primary`, worth 30 points per character, plus `ALL` (the whole Pokédex) worth 1000. The bonus is an `EARN` ledger row with `reference_type = 'DEX_SET'` and `reference_id = '<childId>:<set>'`. Migration 0009 adds `DEX_SET` to the one-payout-per-reference unique index.
+
 ## Error shape
 
 ```json

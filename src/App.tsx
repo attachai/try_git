@@ -3,6 +3,7 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import ProfileLogin from "./components/ProfileLogin";
 import QuestBoard from "./components/QuestBoard";
 import GachaBox from "./components/GachaBox";
+import Pokedex from "./components/Pokedex";
 import { api } from "./lib/api";
 import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
 
@@ -27,7 +28,7 @@ type CollectionItem = {
   type_primary: string; type_secondary?: string | null; image_url: string; rarity: string;
   evolution_cost?: number | null; evolution_name?: string | null; evolution_image_url?: string | null;
 };
-type ChildTab = "home" | "shop" | "collection" | "history";
+type ChildTab = "home" | "shop" | "collection" | "pokedex" | "history";
 type ParentTab = "home" | "quests" | "history" | "family";
 type PendingAction =
   | { kind: "purchase"; character: ShopCharacter }
@@ -707,6 +708,10 @@ export default function App() {
               </section>
             )}
 
+            {isChild && childTab === "pokedex" && (
+              <Pokedex onChanged={refreshChildGame} onCelebrate={(title, detail) => setCelebration({ title, detail })} />
+            )}
+
             {isChild && childTab === "shop" && (
               <GachaBox balance={activeChild.points_balance} onChanged={refreshChildGame} />
             )}
@@ -761,6 +766,7 @@ export default function App() {
             <button className={childTab === "home" ? "active" : ""} onClick={() => setChildTab("home")}><span>🏠</span>Home</button>
             <button className={childTab === "shop" ? "active" : ""} onClick={() => setChildTab("shop")}><span>🛍️</span>Shop</button>
             <button className={childTab === "collection" ? "active" : ""} onClick={() => setChildTab("collection")}><span>🎒</span>Collection</button>
+            <button className={childTab === "pokedex" ? "active" : ""} onClick={() => setChildTab("pokedex")}><span>📖</span>สมุดสะสม</button>
             <button className={childTab === "history" ? "active" : ""} onClick={() => setChildTab("history")}><span>📜</span>History</button>
           </>
         ) : (
