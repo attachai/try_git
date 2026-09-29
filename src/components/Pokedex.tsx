@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { TypeBadges, typeLabel } from "./TypeBadge";
 
 type Entry = {
   id: string; external_id: string | null; name: string; image_url: string; rarity: string;
@@ -84,7 +85,7 @@ export default function Pokedex({ onChanged, onCelebrate }: Props) {
             return (
               <div className={"dex-set" + (complete ? " complete" : "") + (set.set === ALL_SET ? " all" : "")} key={set.set}>
                 <div>
-                  <strong>{set.set === ALL_SET ? "🏆 ครบทุกตัว" : set.set}</strong>
+                  <strong>{set.set === ALL_SET ? "🏆 ครบทุกตัว" : typeLabel(set.set)}</strong>
                   <small>{set.registered}/{set.total} · +{set.bonus}</small>
                   <span className="dex-set-bar"><span style={{ width: Math.round((set.registered / set.total) * 100) + "%" }} /></span>
                 </div>
@@ -121,9 +122,12 @@ export default function Pokedex({ onChanged, onCelebrate }: Props) {
               <span className="dex-number">#{String(entry.external_id ?? "?").padStart(3, "0")}</span>
               <img src={entry.image_url} alt={entry.registered ? entry.name : "ยังไม่มี " + entry.name} loading="lazy" />
               <strong>{entry.name}</strong>
+              <TypeBadges primary={entry.type_primary} secondary={entry.type_secondary} iconOnly />
               <span className={"rarity rarity-" + entry.rarity.toLowerCase()}>{entry.rarity}</span>
               {selected === entry.id && (
-                <small className="dex-hint">{entry.registered ? entry.type_primary + (entry.type_secondary ? " / " + entry.type_secondary : "") : howToGet(entry)}</small>
+                entry.registered
+                  ? <TypeBadges primary={entry.type_primary} secondary={entry.type_secondary} />
+                  : <small className="dex-hint">{howToGet(entry)}</small>
               )}
             </button>
           ))}

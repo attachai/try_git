@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { TypeBadges } from "./TypeBadge";
 
 type Odds = { rarity: string; percent: number; count: number };
 type Info = { price: number; daily_limit: number; spins_today: number; pool_size: number; odds: Odds[] };
@@ -93,6 +94,7 @@ export default function GachaBox({ balance, onChanged }: Props) {
             <p className="eyebrow">ได้ตัวใหม่!</p>
             <img src={prize.image_url} alt={prize.name} />
             <h2>{prize.name}</h2>
+            <TypeBadges primary={prize.type_primary} secondary={prize.type_secondary} />
             <span className={"rarity rarity-" + prize.rarity.toLowerCase()}>{prize.rarity}</span>
             <button className="submit-button earn" onClick={() => setPrize(null)}>เยี่ยม! 🎉</button>
           </div>

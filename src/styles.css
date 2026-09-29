@@ -78,14 +78,30 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .rarity-epic { background: linear-gradient(135deg, #7c3aed, #c026d3); color: #ffffff; box-shadow: 0 2px 6px rgba(124, 58, 237, .35); }
 .rarity-legendary { background: linear-gradient(135deg, #fde68a, #f59e0b); color: #78350f; box-shadow: 0 0 0 1px #d97706, 0 2px 8px rgba(245, 158, 11, .45); }
 .type-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
-.element { background: #f1f5f9; color: #334155; border-radius: 999px; padding: 6px 9px; font-size: 12px; font-weight: 800; }
-.element-electric { background: #fef9c3; color: #854d0e; }
+.element { display: inline-flex; align-items: center; gap: 4px; background: #f1f5f9; color: #334155; border-radius: 999px; padding: 5px 10px 5px 7px; font-size: 12px; font-weight: 800; line-height: 1; box-shadow: inset 0 0 0 1px rgba(15,23,42,.06); }
+.element.icon-only { padding: 4px; font-size: 13px; }
+.type-badges { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.element-normal { background: #f1f5f9; color: #475569; }
 .element-fire { background: #ffedd5; color: #9a3412; }
 .element-water { background: #dbeafe; color: #1d4ed8; }
 .element-grass { background: #dcfce7; color: #166534; }
-.element-normal { background: #f1f5f9; color: #475569; }
-.element-ghost { background: #ede9fe; color: #6d28d9; }
+.element-electric { background: #fef9c3; color: #854d0e; }
+.element-ice { background: #cffafe; color: #0e7490; }
 .element-fighting { background: #fee2e2; color: #991b1b; }
+.element-poison { background: #f3e8ff; color: #7e22ce; }
+.element-ground { background: #fef3c7; color: #92400e; }
+.element-flying { background: #e0e7ff; color: #4338ca; }
+.element-psychic { background: #fce7f3; color: #be185d; }
+.element-bug { background: #ecfccb; color: #4d7c0f; }
+.element-rock { background: #e7e5e4; color: #57534e; }
+.element-ghost { background: #ede9fe; color: #5b21b6; }
+.element-dragon { background: #e0e7ff; color: #3730a3; box-shadow: inset 0 0 0 1px #a5b4fc; }
+.element-dark { background: #e2e8f0; color: #1e293b; }
+.element-steel { background: #f1f5f9; color: #334155; box-shadow: inset 0 0 0 1px #94a3b8; }
+.element-fairy { background: #fdf2f8; color: #db2777; box-shadow: inset 0 0 0 1px #fbcfe8; }
+.dex-card .type-badges { gap: 3px; }
+.dex-card.missing .element { opacity: .55; }
+.gacha-card .type-badges { margin-top: -2px; }
 .buy-button, .evolve-button { width: 100%; border: 0; border-radius: 14px; padding: 11px; color: white; font-weight: 900; }
 .buy-button { background: #111827; }
 .evolve-button { background: linear-gradient(135deg, #7c3aed, #4f46e5); }
