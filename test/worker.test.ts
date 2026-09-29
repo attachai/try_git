@@ -3,6 +3,7 @@ import { env, SELF } from "cloudflare:test";
 
 async function resetDb() {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM gacha_spins"),
     env.DB.prepare("DELETE FROM quest_completions"),
     env.DB.prepare("DELETE FROM quests"),
     env.DB.prepare("DELETE FROM evolution_transactions"),
@@ -372,5 +373,75 @@ describe("daily quests and streaks", () => {
 
     expect((await post("/api/quests/archive", parent, { questId })).status).toBe(200);
     expect((await post("/api/quests/complete", kid, { questId })).status).toBe(404);
+  });
+});
+
+describe("mystery box", () => {
+  function get(path: string, cookie: string) {
+    return SELF.fetch("https://example.test" + path, { headers: { cookie } });
+  }
+
+  async function addShopCharacters(count: number) {
+    await env.DB.batch(Array.from({ length: count }, (_, i) =>
+      env.DB.prepare("INSERT INTO characters (id, name, slug, type_primary, image_url, price, rarity) VALUES (?, ?, ?, 'Water', 'https://example.test/x.png', 300, 'RARE')")
+        .bind("extra" + i, "Extra " + i, "extra-" + i)));
+  }
+
+  async function balance() {
+    return (await env.DB.prepare("SELECT points_balance FROM children WHERE id = 'child'").first<{ points_balance: number }>())!.points_balance;
+  }
+
+  it("charges the price and grants a shop character the child doesn't own", async () => {
+    const kid = await sessionCookie("child-user");
+    const response = await post("/api/gacha/spin", kid, {});
+    expect(response.status).toBe(201);
+    const { character } = await response.json() as { character: { id: string } };
+    // Only the purchasable "starter" is in the pool; "evolved" (price 0) never drops.
+    expect(character.id).toBe("starter");
+    expect(await balance()).toBe(600);
+
+    const empty = await post("/api/gacha/spin", kid, {});
+    expect(empty.status).toBe(409);
+    expect(await balance()).toBe(600);
+  });
+
+  it("never grants a duplicate and stops after the daily limit", async () => {
+    await env.DB.prepare("UPDATE children SET points_balance = 5000 WHERE id = 'child'").run();
+    await addShopCharacters(5);
+    const kid = await sessionCookie("child-user");
+    const got = new Set<string>();
+    for (let i = 0; i < 3; i += 1) {
+      const response = await post("/api/gacha/spin", kid, {});
+      expect(response.status).toBe(201);
+      got.add((await response.json() as { character: { id: string } }).character.id);
+    }
+    expect(got.size).toBe(3);
+    expect((await post("/api/gacha/spin", kid, {})).status).toBe(429);
+    expect(await balance()).toBe(5000 - 3 * 400);
+
+    const info = await (await get("/api/gacha", kid)).json() as { spins_today: number; pool_size: number };
+    expect(info).toMatchObject({ spins_today: 3, pool_size: 3 });
+  });
+
+  it("rejects a spin without enough points and never charges", async () => {
+    await env.DB.prepare("UPDATE children SET points_balance = 399 WHERE id = 'child'").run();
+    expect((await post("/api/gacha/spin", await sessionCookie("child-user"), {})).status).toBe(409);
+    expect(await balance()).toBe(399);
+    const spins = await env.DB.prepare("SELECT count(*) AS n FROM gacha_spins").first<{ n: number }>();
+    expect(spins?.n).toBe(0);
+  });
+
+  it("shows odds that add up to 100% over what is left", async () => {
+    await addShopCharacters(2);
+    const info = await (await get("/api/gacha", await sessionCookie("child-user"))).json() as { odds: { rarity: string; percent: number }[] };
+    // Pool has COMMON (starter) and RARE (extras) only, so 60:30 renormalizes to 66.7 / 33.3.
+    expect(info.odds).toEqual([
+      { rarity: "COMMON", percent: 66.7, count: 1 },
+      { rarity: "RARE", percent: 33.3, count: 2 },
+    ]);
+  });
+
+  it("is only for children", async () => {
+    expect((await post("/api/gacha/spin", await sessionCookie("parent"), {})).status).toBe(403);
   });
 });
