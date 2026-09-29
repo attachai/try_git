@@ -125,3 +125,61 @@ describe("shop and evolution", () => {
     expect(child?.points_balance).toBe(300);
   });
 });
+
+describe("adding children", () => {
+  function get(path: string, cookie: string) {
+    return SELF.fetch("https://example.test" + path, { headers: { cookie } });
+  }
+
+  function childLogin(familyCode: string, childName: string, pin: string) {
+    return SELF.fetch("https://example.test/api/auth/login/child", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://example.test" },
+      body: JSON.stringify({ familyCode, childName, pin }),
+    });
+  }
+
+  it("creates a new family with a child who can sign in with the PIN", async () => {
+    const cookie = await sessionCookie("parent");
+    const response = await post("/api/children", cookie, {
+      displayName: "ultra", pin: "1234", newFamily: { name: "ultra", familyCode: "ultra" },
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json() as { family: { family_code: string } };
+    expect(body.family.family_code).toBe("ULTRA");
+
+    expect((await childLogin("ULTRA", "Ultra", "1234")).status).toBe(200);
+    expect((await childLogin("ULTRA", "ultra", "9999")).status).toBe(401);
+
+    const families = await (await get("/api/families", cookie)).json() as { families: { family_code: string | null }[] };
+    expect(families.families.map((f) => f.family_code)).toContain("ULTRA");
+    const children = await (await get("/api/children", cookie)).json() as { children: { display_name: string }[] };
+    expect(children.children.map((c) => c.display_name).sort()).toEqual(["Child", "ultra"]);
+  });
+
+  it("adds a child to an existing family and rejects a duplicate name", async () => {
+    const cookie = await sessionCookie("parent");
+    expect((await post("/api/children", cookie, { displayName: "Second", pin: "5678", familyId: "fam_test" })).status).toBe(201);
+    expect((await post("/api/children", cookie, { displayName: "second", pin: "5678", familyId: "fam_test" })).status).toBe(409);
+  });
+
+  it("rejects a family code that is already used", async () => {
+    const cookie = await sessionCookie("parent");
+    await post("/api/children", cookie, { displayName: "A", pin: "1234", newFamily: { name: "One", familyCode: "SAME" } });
+    const response = await post("/api/children", cookie, { displayName: "B", pin: "1234", newFamily: { name: "Two", familyCode: "same" } });
+    expect(response.status).toBe(409);
+    const families = await env.DB.prepare("SELECT count(*) AS n FROM families WHERE name = 'Two'").first<{ n: number }>();
+    expect(families?.n).toBe(0);
+  });
+
+  it("only lets a parent add children to their own family", async () => {
+    await env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')").run();
+    expect((await post("/api/children", await sessionCookie("parent"), { displayName: "X", pin: "1234", familyId: "fam_other" })).status).toBe(404);
+    expect((await post("/api/children", await sessionCookie("child-user"), { displayName: "X", pin: "1234", familyId: "fam_test" })).status).toBe(403);
+  });
+
+  it("rejects an invalid PIN", async () => {
+    const response = await post("/api/children", await sessionCookie("parent"), { displayName: "X", pin: "12", familyId: "fam_test" });
+    expect(response.status).toBe(400);
+  });
+});
