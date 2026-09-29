@@ -14,7 +14,11 @@
     "db:migrate:remote": "wrangler d1 migrations apply family-reward-db --remote",
     "db:seed:local": "wrangler d1 execute family-reward-db --local --file=./db/seed/001_demo.sql",
     "db:seed:remote": "wrangler d1 execute family-reward-db --remote --file=./db/seed/001_demo.sql",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "config:production": "node scripts/render-production-config.mjs",
+    "db:migrate:production": "wrangler d1 migrations apply family-reward-db-production --remote --config wrangler.production.jsonc",
+    "deploy:production": "wrangler deploy --config wrangler.production.jsonc",
+    "smoke:production": "node scripts/smoke-production.mjs"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.9.1",
