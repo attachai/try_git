@@ -96,3 +96,17 @@ CI verification passed: dependency install, TypeScript typecheck, Workers/D1 tes
 ## Next
 
 Phase 10: run build/test gate, create production D1, configure Cloudflare environment, and deploy.
+
+
+## Phase 10 — Production release preparation
+Status: READY FOR CLOUDFLARE CREDENTIALS / AUTH GATE
+
+- Production Wrangler template
+- Runtime D1 ID injection from GitHub Secrets
+- GitHub Actions production deployment workflow
+- Remote migration step
+- Worker/static asset deployment step
+- Production smoke test
+- docs/PHASE10_PRODUCTION.md
+
+Deployment is intentionally not executed yet because this session has GitHub access but no authorized Cloudflare account/API token. In addition, production demo login is disabled, so real parent/child authentication must be implemented before public family use.
