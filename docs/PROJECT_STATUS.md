@@ -37,7 +37,7 @@ Status: MVP COMPLETE
 Status: MVP COMPLETE
 
 - D1-backed shop catalog
-- Pokémon prototype artwork URLs isolated as data
+- Prototype artwork URLs isolated as replaceable data
 - Type and rarity presentation
 - Owned-state indication
 
@@ -50,32 +50,49 @@ Status: MVP COMPLETE
 - Insufficient balance rollback
 - Duplicate owned-character protection
 
-Cloudflare documents D1 batch statements as transactional and rolled back when a statement fails.
-
 ## Phase 7 — Collection + evolution
 Status: MVP COMPLETE
 
 - Child collection API and UI
-- Current ownership state
 - Evolution paths and costs
-- Pikachu -> Raichu
-- Charmander -> Charmeleon -> Charizard
-- Squirtle -> Wartortle -> Blastoise
-- Bulbasaur -> Ivysaur -> Venusaur
 - Atomic evolution ledger/ownership/audit batch
 - Evolved source retained for lineage with status EVOLVED
 
-## Not implemented yet
+## Phase 8 — Game UX polish
+Status: COMPLETE
 
-- Production password/passkey/magic-link login
-- Automated tests
-- UX animations/celebration
+- Mobile bottom navigation
+- Child Home / Shop / Collection / History separation
+- Parent Points / History navigation
+- Custom confirmation dialog replaces browser confirm()
+- Purchase and evolution celebration feedback
+- Loading/disabled mutation states
+- Responsive collection/shop cards
+- prefers-reduced-motion support
+
+## Phase 9 — Tests + security review
+Status: IMPLEMENTED; EXECUTION VERIFICATION REQUIRED
+
+- Cloudflare Workers Vitest plugin configured
+- D1 migrations applied in test runtime
+- Integration tests for point ledger, authorization, negative balance, purchase and evolution
+- Cross-site mutation test
+- Production Secure session cookie
+- Origin/Sec-Fetch-Site mutation guard
+- Security response headers
+- docs/SECURITY.md
+
+The test suite must be executed with npm install && npm test before merging/deploying.
+
+## Production gates remaining
+
+- Production password/passkey/magic-link authentication
+- Production authentication rate limiting
 - Production D1 database ID
 - Cloudflare deployment
 - Original/licensed character artwork for public/commercial use
+- Final CSP after asset hosts are decided
 
 ## Next
 
-Phase 8: UI polish, navigation, celebration/evolution animation.
-Phase 9: automated tests and security review.
-Phase 10: create production D1 database and deploy to Cloudflare.
+Phase 10: run build/test gate, create production D1, configure Cloudflare environment, and deploy.
