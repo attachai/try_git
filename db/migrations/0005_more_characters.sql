@@ -1,8 +1,16 @@
--- Additional 50 characters for the shop/collection.
--- Run after 001_demo.sql: some evolution paths target characters seeded there
--- (Pikachu, Gengar, Lucario, Snorlax). INSERT OR IGNORE keeps this re-runnable.
+-- Adds 50 more characters and their evolution paths.
+-- This is a migration (not a seed) so the production deploy workflow applies it.
+-- Pikachu, Gengar, Lucario and Snorlax are evolution targets from 001_demo.sql;
+-- they are inserted here too so this works on a database that was never seeded.
+-- INSERT OR IGNORE leaves any existing rows untouched.
 -- Each character has at most one outgoing evolution path because the collection
 -- and evolve queries assume a single path, so Eeveelutions are shop items.
+
+INSERT OR IGNORE INTO characters (id, external_id, name, slug, type_primary, type_secondary, image_url, price, rarity) VALUES
+  ('char_pikachu', '25', 'Pikachu', 'pikachu', 'Electric', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png', 500, 'RARE'),
+  ('char_snorlax', '143', 'Snorlax', 'snorlax', 'Normal', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/143.png', 800, 'RARE'),
+  ('char_gengar', '94', 'Gengar', 'gengar', 'Ghost', 'Poison', 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/94.png', 900, 'EPIC'),
+  ('char_lucario', '448', 'Lucario', 'lucario', 'Fighting', 'Steel', 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/448.png', 1000, 'EPIC');
 
 INSERT OR IGNORE INTO characters (id, external_id, name, slug, type_primary, type_secondary, image_url, price, rarity) VALUES
   ('char_caterpie', '10', 'Caterpie', 'caterpie', 'Bug', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/10.png', 300, 'COMMON'),

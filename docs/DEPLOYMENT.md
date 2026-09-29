@@ -20,10 +20,9 @@ npm run db:migrate:local
 ## Local seed
 ```bash
 npm run db:seed:local
-npm run db:seed:characters:local
 ```
 
-`db:seed:characters:*` adds 50 more characters and their evolution paths from `db/seed/002_more_characters.sql`. Run it after the demo seed; it is safe to re-run.
+Character catalog data beyond the demo set lives in migrations (for example `0005_more_characters.sql`), so `db:migrate:*` and the production deploy apply it.
 
 ## Development
 ```bash
@@ -40,7 +39,6 @@ Use demo seed remotely only for a disposable/test environment.
 
 ```bash
 npm run db:seed:remote
-npm run db:seed:characters:remote
 ```
 
 ## Deploy
