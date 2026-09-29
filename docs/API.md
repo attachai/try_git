@@ -120,6 +120,10 @@ Child only. A character counts as registered once the child has ever had it, inc
 
 A set is every active character sharing a `type_primary`, worth 30 points per character, plus `ALL` (the whole Pokédex) worth 1000. The bonus is an `EARN` ledger row with `reference_type = 'DEX_SET'` and `reference_id = '<childId>:<set>'`. Migration 0009 adds `DEX_SET` to the one-payout-per-reference unique index.
 
+## Arena
+
+Parent-vs-child turn-based battles with room codes. The rules, endpoints, rewards and balance numbers are in [ARENA.md](ARENA.md).
+
 ## Error shape
 
 ```json

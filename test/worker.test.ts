@@ -3,6 +3,7 @@ import { env, SELF } from "cloudflare:test";
 
 async function resetDb() {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM arena_rooms"),
     env.DB.prepare("DELETE FROM gacha_spins"),
     env.DB.prepare("DELETE FROM quest_completions"),
     env.DB.prepare("DELETE FROM quests"),
@@ -498,5 +499,97 @@ describe("pokedex", () => {
 
   it("is only for children", async () => {
     expect((await post("/api/pokedex/claim", await sessionCookie("parent"), { set: "Fire" })).status).toBe(403);
+  });
+});
+
+describe("arena rooms", () => {
+  type View = {
+    room: { code: string; status: string; version: number; winner: string | null; reward_points: number; my_side: string };
+    parent_team: { id: string }[];
+    state: { turn: string; winner: string | null; teams: Record<string, { fighters: { name: string }[] }> } | null;
+  };
+  const get = (path: string, cookie: string) => SELF.fetch("https://example.test" + path, { headers: { cookie } });
+
+  async function roomWithTeam(autoParent: boolean, prize = 50) {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    const created = await post("/api/arena/rooms", parent, { difficulty: "EASY", prize, autoParent });
+    expect(created.status).toBe(201);
+    const { room } = await created.json() as View;
+    expect(room.code).toMatch(/^\d{4}$/);
+    expect((await post(`/api/arena/rooms/${room.code}/join`, kid, {})).status).toBe(200);
+    const picked = await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: [owned!.id] });
+    expect(picked.status).toBe(200);
+    return { parent, kid, code: room.code, view: await picked.json() as View };
+  }
+
+  it("runs a full battle against the auto parent and pays the child once", async () => {
+    const { kid, code, view } = await roomWithTeam(true);
+    expect(view.room.status).toBe("BATTLE");
+    expect(view.state?.teams.CHILD.fighters.map((f) => f.name)).toEqual(["Starter"]);
+
+    let current = view;
+    for (let i = 0; i < 100 && current.room.status === "BATTLE"; i += 1) {
+      const response = await post(`/api/arena/rooms/${code}/action`, kid, { version: current.room.version, action: "ATTACK" });
+      expect(response.status).toBe(200);
+      current = await response.json() as View;
+      // The auto parent answers in the same request, so it's always the child's turn again.
+      if (current.room.status === "BATTLE") expect(current.state?.turn).toBe("CHILD");
+    }
+    expect(current.room.status).toBe("FINISHED");
+    const expected = current.room.winner === "CHILD" ? 50 : 10;
+    expect(current.room.reward_points).toBe(expected);
+    const ledger = await env.DB.prepare("SELECT points FROM point_transactions WHERE reference_type = 'ARENA'").all<{ points: number }>();
+    expect(ledger.results.map((r) => r.points)).toEqual([expected]);
+    expect((await post(`/api/arena/rooms/${code}/action`, kid, { version: current.room.version, action: "ATTACK" })).status).toBe(409);
+  });
+
+  it("enforces turns and rejects a stale version", async () => {
+    const { parent, kid, code, view } = await roomWithTeam(false);
+    expect((await post(`/api/arena/rooms/${code}/action`, parent, { version: view.room.version, action: "ATTACK" })).status).toBe(409);
+    const first = await post(`/api/arena/rooms/${code}/action`, kid, { version: view.room.version, action: "ATTACK" });
+    expect(first.status).toBe(200);
+    // Same version again (a double tap) is refused.
+    expect((await post(`/api/arena/rooms/${code}/action`, kid, { version: view.room.version, action: "ATTACK" })).status).toBe(409);
+    const next = await first.json() as View;
+    expect(next.state?.turn).toBe("PARENT");
+    expect((await post(`/api/arena/rooms/${code}/action`, parent, { version: next.room.version, action: "GUARD" })).status).toBe(200);
+    const parentView = await (await get(`/api/arena/rooms/${code}`, parent)).json() as View;
+    expect(parentView.room.my_side).toBe("PARENT");
+    expect(parentView.state?.turn).toBe("CHILD");
+  });
+
+  it("only lets a child use monsters they own and only once per slot", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    const { room } = await (await post("/api/arena/rooms", parent, { difficulty: "NORMAL", prize: 0, autoParent: false })).json() as View;
+    await post(`/api/arena/rooms/${room.code}/join`, kid, {});
+    expect((await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: ["not-mine"] })).status).toBe(400);
+    expect((await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: [] })).status).toBe(400);
+  });
+
+  it("hides rooms from children outside the family and lets the parent cancel", async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')"),
+      env.DB.prepare("INSERT INTO users (id, display_name, role) VALUES ('other-kid', 'Other Kid', 'CHILD')"),
+      env.DB.prepare("INSERT INTO children (id, family_id, user_id, display_name, points_balance) VALUES ('other-child', 'fam_other', 'other-kid', 'Other Kid', 0)"),
+    ]);
+    const parent = await sessionCookie("parent");
+    const { room } = await (await post("/api/arena/rooms", parent, { difficulty: "HARD", prize: 200, autoParent: false })).json() as View;
+    expect((await post(`/api/arena/rooms/${room.code}/join`, await sessionCookie("other-kid"), {})).status).toBe(404);
+
+    const current = await (await get("/api/arena/rooms/current", parent)).json() as View;
+    expect(current.room.code).toBe(room.code);
+    expect((await post(`/api/arena/rooms/${room.code}/cancel`, parent, {})).status).toBe(200);
+    expect((await (await get("/api/arena/rooms/current", parent)).json() as { room: null }).room).toBeNull();
+    expect((await post(`/api/arena/rooms/${room.code}/join`, await sessionCookie("child-user"), {})).status).toBe(404);
+  });
+
+  it("validates room settings", async () => {
+    const parent = await sessionCookie("parent");
+    expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 500, autoParent: false })).status).toBe(400);
+    expect((await post("/api/arena/rooms", await sessionCookie("child-user"), { difficulty: "EASY", prize: 0, autoParent: false })).status).toBe(403);
   });
 });

@@ -5,6 +5,9 @@ import QuestBoard from "./components/QuestBoard";
 import GachaBox from "./components/GachaBox";
 import Pokedex from "./components/Pokedex";
 import { TypeBadges } from "./components/TypeBadge";
+import StatBlock from "./components/StatBlock";
+import ArenaParent from "./components/arena/ArenaParent";
+import ArenaChild from "./components/arena/ArenaChild";
 import { api } from "./lib/api";
 import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
 
@@ -29,8 +32,8 @@ type CollectionItem = {
   type_primary: string; type_secondary?: string | null; image_url: string; rarity: string;
   evolution_cost?: number | null; evolution_name?: string | null; evolution_image_url?: string | null;
 };
-type ChildTab = "home" | "shop" | "collection" | "pokedex" | "history";
-type ParentTab = "home" | "quests" | "history" | "family";
+type ChildTab = "home" | "shop" | "collection" | "pokedex" | "history" | "arena";
+type ParentTab = "home" | "quests" | "arena" | "history" | "family";
 type PendingAction =
   | { kind: "purchase"; character: ShopCharacter }
   | { kind: "evolve"; item: CollectionItem }
@@ -407,6 +410,7 @@ export default function App() {
   const showHistory = isChild ? childTab === "history" : parentTab === "history";
   const showHome = isChild ? childTab === "home" : parentTab === "home";
   const showFamily = !isChild && parentTab === "family";
+  const showArena = !isChild && parentTab === "arena";
 
   return (
     <>
@@ -419,7 +423,7 @@ export default function App() {
           <button className="link-button" onClick={logout}>ออกจากระบบ</button>
         </header>
 
-        {user.role === "PARENT" && !showFamily && children.length > 1 && (
+        {user.role === "PARENT" && !showFamily && !showArena && children.length > 1 && (
           <label className="child-picker">
             เด็ก
             <select value={selectedChildId} onChange={(e) => setSelectedChildId(e.target.value)}>
@@ -564,7 +568,9 @@ export default function App() {
           </>
         )}
 
-        {activeChild && !showFamily && (
+        {showArena && <ArenaParent />}
+
+        {activeChild && !showFamily && !showArena && (
           <>
             <section className="hero-card game-hero">
               <div>
@@ -668,6 +674,18 @@ export default function App() {
             )}
 
             {isChild && childTab === "home" && (
+              <button className="arena-banner" onClick={() => setChildTab("arena")}>
+                <span aria-hidden="true">⚔️</span>
+                <div><strong>Arena</strong><small>ใส่รหัสห้องแล้วท้าสู้พ่อแม่!</small></div>
+                <span aria-hidden="true">›</span>
+              </button>
+            )}
+
+            {isChild && childTab === "arena" && (
+              <ArenaChild collection={collection} onBack={() => setChildTab("home")} onFinished={refreshChildGame} />
+            )}
+
+            {isChild && childTab === "home" && (
               <section className="game-stats">
                 <button className="stat-card" onClick={() => setChildTab("collection")}>
                   <span className="stat-icon">🎒</span>
@@ -697,6 +715,7 @@ export default function App() {
                         <div className="character-art image-art"><img src={item.image_url} alt={item.name} /></div>
                         <div className="card-row"><h3>{item.name}</h3><span className={"rarity rarity-" + item.rarity.toLowerCase()}>{item.rarity}</span></div>
                         <div className="type-row"><TypeBadges primary={item.type_primary} secondary={item.type_secondary} /></div>
+                        <StatBlock monster={item} />
                         {item.evolution_name && item.evolution_cost ? (
                           <button className="evolve-button" onClick={() => setPendingAction({ kind: "evolve", item })}>
                             ✨ วิวัฒนาการ · ⭐ {item.evolution_cost}
@@ -728,6 +747,7 @@ export default function App() {
                       <div className="type-row">
                         <TypeBadges primary={character.type_primary} secondary={character.type_secondary} />
                       </div>
+                      <StatBlock monster={character} showMatchups={false} />
                       <button disabled={Boolean(character.owned) || busy} className="buy-button" onClick={() => setPendingAction({ kind: "purchase", character })}>
                         {character.owned ? "มีแล้ว ✓" : "ซื้อ · ⭐ " + character.price}
                       </button>
@@ -776,6 +796,7 @@ export default function App() {
               <span>🎯</span>ภารกิจ
               {pendingQuestCount > 0 && <em className="nav-badge" aria-label={pendingQuestCount + " รายการรอยืนยัน"}>{pendingQuestCount}</em>}
             </button>
+            <button className={parentTab === "arena" ? "active" : ""} onClick={() => setParentTab("arena")}><span>⚔️</span>Arena</button>
             <button className={parentTab === "history" ? "active" : ""} onClick={() => setParentTab("history")}><span>📜</span>ประวัติ</button>
             <button className={parentTab === "family" ? "active" : ""} onClick={() => setParentTab("family")}><span>👨‍👩‍👧</span>ครอบครัว</button>
           </>
