@@ -1,9 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfirmDialog from "./components/ConfirmDialog";
+import ProfileLogin from "./components/ProfileLogin";
+import { api } from "./lib/api";
+import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
 
 type User = { id: string; display_name: string; role: "PARENT" | "CHILD" };
 type Child = { id: string; family_id?: string; display_name: string; avatar_url?: string | null; points_balance: number };
-type Family = { id: string; name: string; family_code: string | null };
+type FamilyMember = {
+  family_id: string; user_id: string; display_name: string; role: "PARENT" | "CHILD";
+  relation: "FATHER" | "MOTHER" | "GUARDIAN" | "CHILD"; child_id?: string | null; avatar_url?: string | null; has_pin: number;
+};
+type Family = { id: string; name: string; family_code: string | null; members?: FamilyMember[] };
+type ParentRelation = "FATHER" | "MOTHER" | "GUARDIAN";
 type HistoryItem = {
   id: string; transaction_type: string; points: number; reason: string;
   created_at: string; created_by_name?: string | null;
@@ -36,18 +44,28 @@ const DEDUCT_REASONS = [
 ];
 const OTHER_REASON = "อื่นๆ";
 const NEW_FAMILY = "__new";
+const AVATAR_SIZE = 256;
+const AVATAR_MAX_CHARS = 200 * 1024;
+
+// Center-crops and shrinks a photo so it fits the API's inline avatar limit.
+async function resizeAvatar(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = AVATAR_SIZE;
+  canvas.height = AVATAR_SIZE;
+  canvas.getContext("2d")!.drawImage(
+    bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, AVATAR_SIZE, AVATAR_SIZE,
+  );
+  bitmap.close();
+  for (const quality of [0.85, 0.7, 0.5]) {
+    const url = canvas.toDataURL("image/jpeg", quality);
+    if (url.length <= AVATAR_MAX_CHARS) return url;
+  }
+  throw new Error("รูปใหญ่เกินไป ลองรูปอื่น");
+}
 const CUSTOM_AMOUNT_MIN = 10;
 const CUSTOM_AMOUNT_MAX = 1000;
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-  });
-  const body = await response.json() as { error?: { message?: string } } & T;
-  if (!response.ok) throw new Error(body.error?.message ?? "เกิดข้อผิดพลาด");
-  return body;
-}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -69,6 +87,12 @@ export default function App() {
   const [newChildName, setNewChildName] = useState("");
   const [newChildPin, setNewChildPin] = useState("");
   const [familyMessage, setFamilyMessage] = useState("");
+  const [myPin, setMyPin] = useState("");
+  const [myRelation, setMyRelation] = useState<ParentRelation>("GUARDIAN");
+  const [parentFamilyId, setParentFamilyId] = useState("");
+  const [parentName, setParentName] = useState("");
+  const [parentRelation, setParentRelation] = useState<ParentRelation>("MOTHER");
+  const [parentPin, setParentPin] = useState("");
   const [message, setMessage] = useState("");
   const [childTab, setChildTab] = useState<ChildTab>("home");
   const [parentTab, setParentTab] = useState<ParentTab>("home");
@@ -76,12 +100,6 @@ export default function App() {
   const [celebration, setCelebration] = useState<{ title: string; detail: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
-  const [loginRole, setLoginRole] = useState<"PARENT" | "CHILD">("PARENT");
-  const [parentEmail, setParentEmail] = useState("");
-  const [parentPassword, setParentPassword] = useState("");
-  const [familyCode, setFamilyCode] = useState("");
-  const [childName, setChildName] = useState("");
-  const [childPin, setChildPin] = useState("");
 
   const activeChild = useMemo(
     () => (user?.role === "PARENT" ? children.find((c) => c.id === selectedChildId) ?? null : child),
@@ -158,38 +176,17 @@ export default function App() {
     }
   }, [selectedChildId, user?.role]);
 
+  const myMembership = families.flatMap((family) => family.members ?? []).find((member) => member.user_id === user?.id);
+
+  useEffect(() => {
+    if (myMembership && myMembership.relation !== "CHILD") setMyRelation(myMembership.relation);
+  }, [myMembership?.relation]);
+
   useEffect(() => {
     if (!celebration) return;
     const timer = window.setTimeout(() => setCelebration(null), 2400);
     return () => window.clearTimeout(timer);
   }, [celebration]);
-
-  async function productionLogin(event: FormEvent) {
-    event.preventDefault();
-    if (busy) return;
-
-    try {
-      setBusy(true);
-      setMessage("");
-
-      const data = loginRole === "PARENT"
-        ? await api<{ user: User }>("/api/auth/login/parent", {
-            method: "POST",
-            body: JSON.stringify({ email: parentEmail, password: parentPassword }),
-          })
-        : await api<{ user: User }>("/api/auth/login/child", {
-            method: "POST",
-            body: JSON.stringify({ familyCode, childName, pin: childPin }),
-          });
-
-      setUser(data.user);
-      await loadDashboard(data.user);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function demoLogin(role: "PARENT" | "CHILD") {
     setMessage("");
@@ -212,6 +209,70 @@ export default function App() {
     setMessage("");
     setFamilies([]);
     setFamilyMessage("");
+    setParentTab("home");
+    setChildTab("home");
+  }
+
+  async function refreshFamilies() {
+    const [data, familyData] = await Promise.all([
+      api<{ children: Child[] }>("/api/children"),
+      api<{ families: Family[] }>("/api/families"),
+    ]);
+    setChildren(data.children);
+    setFamilies(familyData.families);
+    return familyData.families;
+  }
+
+  async function runFamilyAction(action: () => Promise<string>) {
+    if (busy) return;
+    try {
+      setBusy(true);
+      setFamilyMessage("");
+      setFamilyMessage(await action());
+    } catch (error) {
+      setFamilyMessage(error instanceof Error ? error.message : "เกิดข้อผิดพลาด");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function submitMyProfile(event: FormEvent) {
+    event.preventDefault();
+    runFamilyAction(async () => {
+      await api("/api/auth/profile", {
+        method: "POST",
+        body: JSON.stringify({ relation: myRelation, ...(myPin ? { pin: myPin } : {}) }),
+      });
+      setMyPin("");
+      await refreshFamilies();
+      return myPin ? "บันทึก PIN และบทบาทแล้ว ครั้งหน้าแตะรูปของคุณแล้วใส่ PIN ได้เลย" : "บันทึกบทบาทแล้ว";
+    }).catch(() => undefined);
+  }
+
+  function submitAddParent(event: FormEvent) {
+    event.preventDefault();
+    runFamilyAction(async () => {
+      await api("/api/parents", {
+        method: "POST",
+        body: JSON.stringify({ familyId: parentFamilyId || families[0]?.id, displayName: parentName, relation: parentRelation, pin: parentPin }),
+      });
+      const added = parentName;
+      setParentName("");
+      setParentPin("");
+      await refreshFamilies();
+      return "เพิ่ม " + added + " แล้ว 🎉 เข้าสู่ระบบโดยแตะรูปแล้วใส่ PIN ที่ตั้งไว้";
+    }).catch(() => undefined);
+  }
+
+  function changeAvatar(member: FamilyMember, file: File | undefined) {
+    const childId = member.child_id;
+    if (!file || !childId) return;
+    runFamilyAction(async () => {
+      const avatarUrl = await resizeAvatar(file);
+      await api("/api/children/avatar", { method: "POST", body: JSON.stringify({ childId, avatarUrl }) });
+      await refreshFamilies();
+      return "เปลี่ยนรูปของ " + member.display_name + " แล้ว";
+    }).catch(() => undefined);
   }
 
   async function submitAddChild(event: FormEvent) {
@@ -232,12 +293,7 @@ export default function App() {
             : { familyId: addFamilyId }),
         }),
       });
-      const [data, familyData] = await Promise.all([
-        api<{ children: Child[] }>("/api/children"),
-        api<{ families: Family[] }>("/api/families"),
-      ]);
-      setChildren(data.children);
-      setFamilies(familyData.families);
+      await refreshFamilies();
       setAddFamilyId(created.family.id);
       if (!selectedChildId) setSelectedChildId(created.child.id);
       setNewChildName("");
@@ -245,8 +301,8 @@ export default function App() {
       setNewFamilyName("");
       setNewFamilyCode("");
       setFamilyMessage(
-        "เพิ่ม " + created.child.display_name + " แล้ว 🎉 เด็กเข้าสู่ระบบด้วย Family Code "
-          + (created.family.family_code ?? "-") + " ชื่อ " + created.child.display_name + " และ PIN ที่ตั้งไว้",
+        "เพิ่ม " + created.child.display_name + " แล้ว 🎉 ใส่ Family Code "
+          + (created.family.family_code ?? "-") + " แล้วแตะรูป " + created.child.display_name + " และใส่ PIN ที่ตั้งไว้",
       );
     } catch (error) {
       setFamilyMessage(error instanceof Error ? error.message : "เกิดข้อผิดพลาด");
@@ -315,64 +371,14 @@ export default function App() {
 
   if (!user) {
     return (
-      <main className="page-shell">
-        <section className="login-card">
-          <div className="brand-mark">⭐</div>
-          <p className="eyebrow">Family Reward Game</p>
-          <h1>สะสมความดี<br />ปลดล็อกตัวโปรด</h1>
-
-          <div className="segmented login-role-tabs">
-            <button className={loginRole === "PARENT" ? "active" : ""} onClick={() => setLoginRole("PARENT")}>👨‍👩‍👧 ผู้ปกครอง</button>
-            <button className={loginRole === "CHILD" ? "active" : ""} onClick={() => setLoginRole("CHILD")}>🎮 เด็ก</button>
-          </div>
-
-          <form className="login-form" onSubmit={productionLogin}>
-            {loginRole === "PARENT" ? (
-              <>
-                <label>
-                  Email
-                  <input type="email" autoComplete="email" value={parentEmail} onChange={(e) => setParentEmail(e.target.value)} required />
-                </label>
-                <label>
-                  Password
-                  <input type="password" autoComplete="current-password" value={parentPassword} onChange={(e) => setParentPassword(e.target.value)} minLength={8} required />
-                </label>
-              </>
-            ) : (
-              <>
-                <label>
-                  Family Code
-                  <input value={familyCode} onChange={(e) => setFamilyCode(e.target.value.toUpperCase())} autoCapitalize="characters" required />
-                </label>
-                <label>
-                  ชื่อเด็ก
-                  <input value={childName} onChange={(e) => setChildName(e.target.value)} required />
-                </label>
-                <label>
-                  PIN
-                  <input type="password" inputMode="numeric" pattern="[0-9]{4,8}" value={childPin} onChange={(e) => setChildPin(e.target.value)} required />
-                </label>
-              </>
-            )}
-
-            <button className="submit-button earn" disabled={busy} type="submit">
-              {busy ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
-            </button>
-          </form>
-
-          {message && <p className="feedback global-feedback">{message}</p>}
-
-          {demoLoginEnabled && (
-            <div className="demo-login-box">
-              <p className="muted">Development Demo</p>
-              <div className="login-actions">
-                <button className="action action-positive" onClick={() => demoLogin("PARENT")}>Demo ผู้ปกครอง</button>
-                <button className="action action-child" onClick={() => demoLogin("CHILD")}>Demo เด็ก</button>
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
+      <ProfileLogin
+        demoLoginEnabled={demoLoginEnabled}
+        onLoggedIn={async (loggedIn) => {
+          setUser(loggedIn);
+          await loadDashboard(loggedIn);
+        }}
+        onDemoLogin={demoLogin}
+      />
     );
   }
 
@@ -409,25 +415,97 @@ export default function App() {
 
         {showFamily && (
           <>
+            {familyMessage && <p className="feedback global-feedback">{familyMessage}</p>}
+
             <section className="panel">
               <div className="section-heading"><h2>ครอบครัว</h2><span>{families.length} ครอบครัว</span></div>
               {families.length === 0 ? <p className="muted">ยังไม่มีครอบครัว</p> : (
                 <div className="family-list">
-                  {families.map((family) => {
-                    const members = children.filter((item) => item.family_id === family.id);
-                    return (
-                      <article className="family-card" key={family.id}>
-                        <div className="card-row">
-                          <h3>{family.name}</h3>
-                          <span className="family-code">{family.family_code ?? "ไม่มี Family Code"}</span>
-                        </div>
-                        <p className="muted">{members.length ? members.map((item) => item.display_name).join(", ") : "ยังไม่มีเด็ก"}</p>
-                      </article>
-                    );
-                  })}
+                  {families.map((family) => (
+                    <article className="family-card" key={family.id}>
+                      <div className="card-row">
+                        <h3>{family.name}</h3>
+                        <span className="family-code">{family.family_code ?? "ไม่มี Family Code"}</span>
+                      </div>
+                      <div className="member-list">
+                        {(family.members ?? []).map((member) => (
+                          <div className="member-row" key={member.user_id}>
+                            <ProfileAvatar profile={member} size="small" />
+                            <div>
+                              <strong>{member.display_name}{member.user_id === user.id ? " (คุณ)" : ""}</strong>
+                              <small>{RELATION_LABEL[member.relation]}{member.has_pin ? "" : " · ยังไม่ได้ตั้ง PIN"}</small>
+                            </div>
+                            {member.child_id && (
+                              <label className="avatar-upload">
+                                เปลี่ยนรูป
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  disabled={busy}
+                                  onChange={(e) => { changeAvatar(member, e.target.files?.[0]); e.target.value = ""; }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
                 </div>
               )}
             </section>
+
+            <section className="panel">
+              <div className="section-heading"><h2>โปรไฟล์ของฉัน</h2><span>ใช้ตอนแตะรูปเพื่อเข้าสู่ระบบ</span></div>
+              <form className="point-form" onSubmit={submitMyProfile}>
+                <label>
+                  ฉันเป็น
+                  <select value={myRelation} onChange={(e) => setMyRelation(e.target.value as ParentRelation)}>
+                    <option value="FATHER">พ่อ</option>
+                    <option value="MOTHER">แม่</option>
+                    <option value="GUARDIAN">ผู้ปกครอง</option>
+                  </select>
+                </label>
+                <label>
+                  {myMembership?.has_pin ? "เปลี่ยน PIN (เว้นว่างถ้าไม่เปลี่ยน)" : "ตั้ง PIN (ตัวเลข 4-8 หลัก)"}
+                  <input className="reason-input" type="password" inputMode="numeric" pattern="[0-9]{4,8}" value={myPin} onChange={(e) => setMyPin(e.target.value)} required={!myMembership?.has_pin} />
+                </label>
+                <button disabled={busy} className="submit-button earn" type="submit">{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
+              </form>
+            </section>
+
+            {families.length > 0 && (
+              <section className="panel">
+                <div className="section-heading"><h2>เพิ่มผู้ปกครอง</h2><span>เช่น แม่ หรือ พ่อ</span></div>
+                <form className="point-form" onSubmit={submitAddParent}>
+                  {families.length > 1 && (
+                    <label>
+                      ครอบครัว
+                      <select value={parentFamilyId || families[0].id} onChange={(e) => setParentFamilyId(e.target.value)}>
+                        {families.map((family) => <option key={family.id} value={family.id}>{family.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    ชื่อ
+                    <input className="reason-input" value={parentName} onChange={(e) => setParentName(e.target.value)} maxLength={80} required />
+                  </label>
+                  <label>
+                    เป็น
+                    <select value={parentRelation} onChange={(e) => setParentRelation(e.target.value as ParentRelation)}>
+                      <option value="MOTHER">แม่</option>
+                      <option value="FATHER">พ่อ</option>
+                      <option value="GUARDIAN">ผู้ปกครอง</option>
+                    </select>
+                  </label>
+                  <label>
+                    PIN (ตัวเลข 4-8 หลัก)
+                    <input className="reason-input" type="password" inputMode="numeric" pattern="[0-9]{4,8}" value={parentPin} onChange={(e) => setParentPin(e.target.value)} required />
+                  </label>
+                  <button disabled={busy} className="submit-button earn" type="submit">{busy ? "กำลังบันทึก..." : "เพิ่มผู้ปกครอง"}</button>
+                </form>
+              </section>
+            )}
 
             <section className="panel">
               <div className="section-heading"><h2>เพิ่มเด็ก</h2><span>ตั้งชื่อและ PIN สำหรับเข้าสู่ระบบ</span></div>
@@ -460,7 +538,6 @@ export default function App() {
                   <input className="reason-input" type="password" inputMode="numeric" pattern="[0-9]{4,8}" value={newChildPin} onChange={(e) => setNewChildPin(e.target.value)} required />
                 </label>
                 <button disabled={busy} className="submit-button earn" type="submit">{busy ? "กำลังบันทึก..." : "เพิ่มเด็ก"}</button>
-                {familyMessage && <p className="feedback">{familyMessage}</p>}
               </form>
             </section>
           </>
@@ -474,7 +551,7 @@ export default function App() {
                 <h1>{activeChild.display_name}</h1>
                 <p className="balance"><span>⭐</span> {activeChild.points_balance.toLocaleString()} คะแนน</p>
               </div>
-              <div className="avatar" aria-hidden="true">{isChild ? "🧒🎒" : "🧒"}</div>
+              <div className="avatar" aria-hidden="true">{activeChild.avatar_url ? <img src={activeChild.avatar_url} alt="" /> : isChild ? "🧒🎒" : "🧒"}</div>
             </section>
 
             {message && <p className="feedback global-feedback">{message}</p>}
