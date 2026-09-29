@@ -71,7 +71,7 @@ Status: COMPLETE
 - prefers-reduced-motion support
 
 ## Phase 9 — Tests + security review
-Status: IMPLEMENTED; EXECUTION VERIFICATION REQUIRED
+Status: COMPLETE / CI VERIFIED
 
 - Cloudflare Workers Vitest plugin configured
 - D1 migrations applied in test runtime
@@ -82,7 +82,7 @@ Status: IMPLEMENTED; EXECUTION VERIFICATION REQUIRED
 - Security response headers
 - docs/SECURITY.md
 
-The test suite must be executed with npm install && npm test before merging/deploying.
+CI verification passed: dependency install, TypeScript typecheck, Workers/D1 tests, and production build all succeeded.
 
 ## Production gates remaining
 
