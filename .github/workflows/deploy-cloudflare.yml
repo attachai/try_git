@@ -15,6 +15,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
       CLOUDFLARE_PRODUCTION_URL: ${{ secrets.CLOUDFLARE_PRODUCTION_URL }}
+      BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +30,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "Missing CLOUDFLARE_ACCOUNT_ID" && exit 1)
           test -n "$CLOUDFLARE_D1_DATABASE_ID" || (echo "Missing CLOUDFLARE_D1_DATABASE_ID" && exit 1)
           test -n "$CLOUDFLARE_PRODUCTION_URL" || (echo "Missing CLOUDFLARE_PRODUCTION_URL" && exit 1)
+          test -n "$BOOTSTRAP_SECRET" || (echo "Missing BOOTSTRAP_SECRET" && exit 1)
 
       - run: npm install --legacy-peer-deps
       - run: npm run typecheck
@@ -37,4 +39,7 @@ jobs:
       - run: npm run config:production
       - run: npm run db:migrate:production
       - run: npm run deploy:production
+      - name: Configure bootstrap secret
+        shell: bash
+        run: printf '%s' "$BOOTSTRAP_SECRET" | npx wrangler secret put BOOTSTRAP_SECRET --config wrangler.production.jsonc
       - run: npm run smoke:production
