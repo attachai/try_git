@@ -5,40 +5,39 @@ import { shopRoutes } from "./routes/shop";
 import { collectionRoutes } from "./routes/collection";
 import type { Env } from "./types";
 import { error, json } from "./lib/http";
+import { isTrustedMutation, withSecurityHeaders } from "./lib/security";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    if (!isTrustedMutation(request)) {
+      return withSecurityHeaders(error(403, "UNTRUSTED_ORIGIN", "Cross-site mutation rejected."));
+    }
+
+    let response: Response;
+
     if (url.pathname === "/api/health") {
       const row = await env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
-      return json({ ok: row?.ok === 1, service: "family-reward-game" });
-    }
-
-    if (url.pathname.startsWith("/api/auth/")) {
-      return (await authRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
-    }
-
-    if (url.pathname === "/api/children" || url.pathname === "/api/child/me") {
-      return (await childrenRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
-    }
-
-    if (url.pathname === "/api/points" || url.pathname.includes("/history")) {
-      return (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
-    }
-
-    if (url.pathname === "/api/shop" || url.pathname === "/api/characters") {
-      return (await shopRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
-    }
-
-    if (
+      response = json({ ok: row?.ok === 1, service: "family-reward-game" });
+    } else if (url.pathname.startsWith("/api/auth/")) {
+      response = (await authRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    } else if (url.pathname === "/api/children" || url.pathname === "/api/child/me") {
+      response = (await childrenRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    } else if (url.pathname === "/api/points" || url.pathname.includes("/history")) {
+      response = (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    } else if (url.pathname === "/api/shop" || url.pathname === "/api/characters") {
+      response = (await shopRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    } else if (
       url.pathname === "/api/collection" ||
       url.pathname === "/api/shop/purchase" ||
       url.pathname === "/api/collection/evolve"
     ) {
-      return (await collectionRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+      response = (await collectionRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    } else {
+      response = error(404, "NOT_FOUND", "Not found.");
     }
 
-    return error(404, "NOT_FOUND", "Not found.");
+    return withSecurityHeaders(response);
   },
 } satisfies ExportedHandler<Env>;
