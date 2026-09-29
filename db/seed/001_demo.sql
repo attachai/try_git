@@ -11,7 +11,7 @@ INSERT INTO family_members (id, family_id, user_id, relation) VALUES
 INSERT INTO children (id, family_id, user_id, display_name, points_balance)
 VALUES ('child_demo', 'fam_demo', 'usr_child', 'Nong Demo', 1880);
 
-INSERT INTO characters (id, external_id, name, slug, type_primary, type_secondary, image_url, price, rarity) VALUES
+INSERT OR IGNORE INTO characters (id, external_id, name, slug, type_primary, type_secondary, image_url, price, rarity) VALUES
   ('char_pikachu', '25', 'Pikachu', 'pikachu', 'Electric', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png', 500, 'RARE'),
   ('char_raichu', '26', 'Raichu', 'raichu', 'Electric', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/26.png', 0, 'EPIC'),
   ('char_eevee', '133', 'Eevee', 'eevee', 'Normal', NULL, 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/133.png', 450, 'COMMON'),
@@ -28,7 +28,7 @@ INSERT INTO characters (id, external_id, name, slug, type_primary, type_secondar
   ('char_gengar', '94', 'Gengar', 'gengar', 'Ghost', 'Poison', 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/94.png', 900, 'EPIC'),
   ('char_lucario', '448', 'Lucario', 'lucario', 'Fighting', 'Steel', 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/448.png', 1000, 'EPIC');
 
-INSERT INTO evolution_paths (id, from_character_id, to_character_id, point_cost) VALUES
+INSERT OR IGNORE INTO evolution_paths (id, from_character_id, to_character_id, point_cost) VALUES
   ('evo_pikachu_raichu', 'char_pikachu', 'char_raichu', 800),
   ('evo_charmander_charmeleon', 'char_charmander', 'char_charmeleon', 600),
   ('evo_charmeleon_charizard', 'char_charmeleon', 'char_charizard', 1000),

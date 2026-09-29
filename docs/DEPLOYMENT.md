@@ -22,6 +22,8 @@ npm run db:migrate:local
 npm run db:seed:local
 ```
 
+Character catalog data beyond the demo set lives in migrations (for example `0005_more_characters.sql`), so `db:migrate:*` and the production deploy apply it.
+
 ## Development
 ```bash
 npm run dev
