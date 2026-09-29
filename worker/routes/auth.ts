@@ -29,11 +29,11 @@ const bootstrapSchema = z.object({
   childPin: z.string().regex(/^\d{4,8}$/),
 });
 
-function normalizedCode(value: string) {
+export function normalizedCode(value: string) {
   return value.trim().toUpperCase().replace(/\s+/g, "-");
 }
 
-function generatedCode() {
+export function generatedCode() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 

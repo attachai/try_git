@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfirmDialog from "./components/ConfirmDialog";
 
 type User = { id: string; display_name: string; role: "PARENT" | "CHILD" };
-type Child = { id: string; display_name: string; avatar_url?: string | null; points_balance: number };
+type Child = { id: string; family_id?: string; display_name: string; avatar_url?: string | null; points_balance: number };
+type Family = { id: string; name: string; family_code: string | null };
 type HistoryItem = {
   id: string; transaction_type: string; points: number; reason: string;
   created_at: string; created_by_name?: string | null;
@@ -17,7 +18,7 @@ type CollectionItem = {
   evolution_cost?: number | null; evolution_name?: string | null; evolution_image_url?: string | null;
 };
 type ChildTab = "home" | "shop" | "collection" | "history";
-type ParentTab = "home" | "history";
+type ParentTab = "home" | "history" | "family";
 type PendingAction =
   | { kind: "purchase"; character: ShopCharacter }
   | { kind: "evolve"; item: CollectionItem }
@@ -34,6 +35,7 @@ const DEDUCT_REASONS = [
   "เข้านอนเกินเวลา", "ไม่ช่วยงานบ้าน",
 ];
 const OTHER_REASON = "อื่นๆ";
+const NEW_FAMILY = "__new";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -57,6 +59,13 @@ export default function App() {
   const [amount, setAmount] = useState(50);
   const [reason, setReason] = useState(EARN_REASONS[0]);
   const [customReason, setCustomReason] = useState("");
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [addFamilyId, setAddFamilyId] = useState(NEW_FAMILY);
+  const [newFamilyName, setNewFamilyName] = useState("");
+  const [newFamilyCode, setNewFamilyCode] = useState("");
+  const [newChildName, setNewChildName] = useState("");
+  const [newChildPin, setNewChildPin] = useState("");
+  const [familyMessage, setFamilyMessage] = useState("");
   const [message, setMessage] = useState("");
   const [childTab, setChildTab] = useState<ChildTab>("home");
   const [parentTab, setParentTab] = useState<ParentTab>("home");
@@ -105,8 +114,13 @@ export default function App() {
 
   async function loadDashboard(currentUser: User) {
     if (currentUser.role === "PARENT") {
-      const data = await api<{ children: Child[] }>("/api/children");
+      const [data, familyData] = await Promise.all([
+        api<{ children: Child[] }>("/api/children"),
+        api<{ families: Family[] }>("/api/families"),
+      ]);
       setChildren(data.children);
+      setFamilies(familyData.families);
+      if (familyData.families[0]) setAddFamilyId(familyData.families[0].id);
       const first = data.children[0];
       if (first) {
         setSelectedChildId(first.id);
@@ -188,6 +202,49 @@ export default function App() {
     setShop([]);
     setCollection([]);
     setMessage("");
+    setFamilies([]);
+    setFamilyMessage("");
+  }
+
+  async function submitAddChild(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    const isNewFamily = addFamilyId === NEW_FAMILY;
+
+    try {
+      setBusy(true);
+      setFamilyMessage("");
+      const created = await api<{ family: Family; child: Child }>("/api/children", {
+        method: "POST",
+        body: JSON.stringify({
+          displayName: newChildName,
+          pin: newChildPin,
+          ...(isNewFamily
+            ? { newFamily: { name: newFamilyName, ...(newFamilyCode.trim() ? { familyCode: newFamilyCode } : {}) } }
+            : { familyId: addFamilyId }),
+        }),
+      });
+      const [data, familyData] = await Promise.all([
+        api<{ children: Child[] }>("/api/children"),
+        api<{ families: Family[] }>("/api/families"),
+      ]);
+      setChildren(data.children);
+      setFamilies(familyData.families);
+      setAddFamilyId(created.family.id);
+      if (!selectedChildId) setSelectedChildId(created.child.id);
+      setNewChildName("");
+      setNewChildPin("");
+      setNewFamilyName("");
+      setNewFamilyCode("");
+      setFamilyMessage(
+        "เพิ่ม " + created.child.display_name + " แล้ว 🎉 เด็กเข้าสู่ระบบด้วย Family Code "
+          + (created.family.family_code ?? "-") + " ชื่อ " + created.child.display_name + " และ PIN ที่ตั้งไว้",
+      );
+    } catch (error) {
+      setFamilyMessage(error instanceof Error ? error.message : "เกิดข้อผิดพลาด");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submitPoints(event: FormEvent) {
@@ -313,6 +370,7 @@ export default function App() {
   const isChild = user.role === "CHILD";
   const showHistory = isChild ? childTab === "history" : parentTab === "history";
   const showHome = isChild ? childTab === "home" : parentTab === "home";
+  const showFamily = !isChild && parentTab === "family";
 
   return (
     <>
@@ -325,7 +383,7 @@ export default function App() {
           <button className="link-button" onClick={logout}>ออกจากระบบ</button>
         </header>
 
-        {user.role === "PARENT" && children.length > 1 && (
+        {user.role === "PARENT" && !showFamily && children.length > 1 && (
           <label className="child-picker">
             เด็ก
             <select value={selectedChildId} onChange={(e) => setSelectedChildId(e.target.value)}>
@@ -334,7 +392,72 @@ export default function App() {
           </label>
         )}
 
-        {activeChild && (
+        {user.role === "PARENT" && !showFamily && children.length === 0 && (
+          <section className="panel">
+            <p className="muted">ยังไม่มีเด็กในครอบครัว ไปที่แท็บ "ครอบครัว" เพื่อเพิ่มเด็กได้เลย</p>
+          </section>
+        )}
+
+        {showFamily && (
+          <>
+            <section className="panel">
+              <div className="section-heading"><h2>ครอบครัว</h2><span>{families.length} ครอบครัว</span></div>
+              {families.length === 0 ? <p className="muted">ยังไม่มีครอบครัว</p> : (
+                <div className="family-list">
+                  {families.map((family) => {
+                    const members = children.filter((item) => item.family_id === family.id);
+                    return (
+                      <article className="family-card" key={family.id}>
+                        <div className="card-row">
+                          <h3>{family.name}</h3>
+                          <span className="family-code">{family.family_code ?? "ไม่มี Family Code"}</span>
+                        </div>
+                        <p className="muted">{members.length ? members.map((item) => item.display_name).join(", ") : "ยังไม่มีเด็ก"}</p>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="panel">
+              <div className="section-heading"><h2>เพิ่มเด็ก</h2><span>ตั้งชื่อและ PIN สำหรับเข้าสู่ระบบ</span></div>
+              <form className="point-form" onSubmit={submitAddChild}>
+                <label>
+                  ครอบครัว
+                  <select value={addFamilyId} onChange={(e) => setAddFamilyId(e.target.value)}>
+                    {families.map((family) => <option key={family.id} value={family.id}>{family.name}</option>)}
+                    <option value={NEW_FAMILY}>＋ สร้างครอบครัวใหม่</option>
+                  </select>
+                </label>
+                {addFamilyId === NEW_FAMILY && (
+                  <>
+                    <label>
+                      ชื่อครอบครัว
+                      <input className="reason-input" value={newFamilyName} onChange={(e) => setNewFamilyName(e.target.value)} minLength={2} maxLength={100} required />
+                    </label>
+                    <label>
+                      Family Code (ไม่ใส่ก็ได้ ระบบจะสุ่มให้)
+                      <input className="reason-input" value={newFamilyCode} onChange={(e) => setNewFamilyCode(e.target.value.toUpperCase())} autoCapitalize="characters" minLength={4} maxLength={20} />
+                    </label>
+                  </>
+                )}
+                <label>
+                  ชื่อเด็ก
+                  <input className="reason-input" value={newChildName} onChange={(e) => setNewChildName(e.target.value)} maxLength={80} required />
+                </label>
+                <label>
+                  PIN (ตัวเลข 4-8 หลัก)
+                  <input className="reason-input" type="password" inputMode="numeric" pattern="[0-9]{4,8}" value={newChildPin} onChange={(e) => setNewChildPin(e.target.value)} required />
+                </label>
+                <button disabled={busy} className="submit-button earn" type="submit">{busy ? "กำลังบันทึก..." : "เพิ่มเด็ก"}</button>
+                {familyMessage && <p className="feedback">{familyMessage}</p>}
+              </form>
+            </section>
+          </>
+        )}
+
+        {activeChild && !showFamily && (
           <>
             <section className="hero-card game-hero">
               <div>
@@ -493,6 +616,7 @@ export default function App() {
           <>
             <button className={parentTab === "home" ? "active" : ""} onClick={() => setParentTab("home")}><span>⭐</span>คะแนน</button>
             <button className={parentTab === "history" ? "active" : ""} onClick={() => setParentTab("history")}><span>📜</span>ประวัติ</button>
+            <button className={parentTab === "family" ? "active" : ""} onClick={() => setParentTab("family")}><span>👨‍👩‍👧</span>ครอบครัว</button>
           </>
         )}
       </nav>
