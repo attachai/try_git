@@ -5,6 +5,7 @@ import QuestBoard from "./components/QuestBoard";
 import GachaBox from "./components/GachaBox";
 import Pokedex from "./components/Pokedex";
 import { TypeBadges } from "./components/TypeBadge";
+import StatBlock from "./components/StatBlock";
 import { api } from "./lib/api";
 import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
 
@@ -697,6 +698,7 @@ export default function App() {
                         <div className="character-art image-art"><img src={item.image_url} alt={item.name} /></div>
                         <div className="card-row"><h3>{item.name}</h3><span className={"rarity rarity-" + item.rarity.toLowerCase()}>{item.rarity}</span></div>
                         <div className="type-row"><TypeBadges primary={item.type_primary} secondary={item.type_secondary} /></div>
+                        <StatBlock monster={item} />
                         {item.evolution_name && item.evolution_cost ? (
                           <button className="evolve-button" onClick={() => setPendingAction({ kind: "evolve", item })}>
                             ✨ วิวัฒนาการ · ⭐ {item.evolution_cost}
@@ -728,6 +730,7 @@ export default function App() {
                       <div className="type-row">
                         <TypeBadges primary={character.type_primary} secondary={character.type_secondary} />
                       </div>
+                      <StatBlock monster={character} showMatchups={false} />
                       <button disabled={Boolean(character.owned) || busy} className="buy-button" onClick={() => setPendingAction({ kind: "purchase", character })}>
                         {character.owned ? "มีแล้ว ✓" : "ซื้อ · ⭐ " + character.price}
                       </button>
