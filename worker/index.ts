@@ -1,6 +1,8 @@
 import { authRoutes } from "./routes/auth";
 import { childrenRoutes } from "./routes/children";
 import { pointsRoutes } from "./routes/points";
+import { shopRoutes } from "./routes/shop";
+import { collectionRoutes } from "./routes/collection";
 import type { Env } from "./types";
 import { error, json } from "./lib/http";
 
@@ -23,6 +25,18 @@ export default {
 
     if (url.pathname === "/api/points" || url.pathname.includes("/history")) {
       return (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    }
+
+    if (url.pathname === "/api/shop" || url.pathname === "/api/characters") {
+      return (await shopRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    }
+
+    if (
+      url.pathname === "/api/collection" ||
+      url.pathname === "/api/shop/purchase" ||
+      url.pathname === "/api/collection/evolve"
+    ) {
+      return (await collectionRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     }
 
     return error(404, "NOT_FOUND", "Not found.");
