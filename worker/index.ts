@@ -22,7 +22,8 @@ export default {
       response = json({ ok: row?.ok === 1, service: "family-reward-game" });
     } else if (url.pathname.startsWith("/api/auth/")) {
       response = (await authRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
-    } else if (url.pathname === "/api/children" || url.pathname === "/api/child/me" || url.pathname === "/api/families") {
+    } else if (url.pathname === "/api/children" || url.pathname === "/api/child/me" || url.pathname === "/api/families" ||
+      url.pathname === "/api/parents" || url.pathname === "/api/children/avatar") {
       response = (await childrenRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname === "/api/points" || url.pathname.includes("/history")) {
       response = (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");

@@ -183,3 +183,79 @@ describe("adding children", () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe("profile picker login", () => {
+  async function publicPost(path: string, body: unknown) {
+    return SELF.fetch("https://example.test" + path, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://example.test" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function setupFamily() {
+    const cookie = await sessionCookie("parent");
+    await env.DB.prepare("UPDATE families SET join_code = 'TESTFAM' WHERE id = 'fam_test'").run();
+    await post("/api/children", cookie, { displayName: "Kid", pin: "1111", familyId: "fam_test" });
+    return cookie;
+  }
+
+  it("lists family profiles by family code", async () => {
+    await setupFamily();
+    const response = await publicPost("/api/auth/family", { familyCode: "testfam" });
+    expect(response.status).toBe(200);
+    const body = await response.json() as { profiles: { display_name: string; has_pin: number }[] };
+    const byName = Object.fromEntries(body.profiles.map((p) => [p.display_name, p.has_pin]));
+    expect(byName).toMatchObject({ Parent: 0, Kid: 1 });
+    expect((await publicPost("/api/auth/family", { familyCode: "NOPE" })).status).toBe(404);
+  });
+
+  it("signs a child in with their PIN", async () => {
+    await setupFamily();
+    const kid = await env.DB.prepare("SELECT user_id FROM children WHERE display_name = 'Kid'").first<{ user_id: string }>();
+    expect((await publicPost("/api/auth/login/profile", { familyCode: "TESTFAM", userId: kid?.user_id, pin: "1111" })).status).toBe(200);
+    expect((await publicPost("/api/auth/login/profile", { familyCode: "TESTFAM", userId: kid?.user_id, pin: "2222" })).status).toBe(401);
+  });
+
+  it("lets a parent set a PIN and relation, then sign in with it", async () => {
+    const cookie = await setupFamily();
+    expect((await publicPost("/api/auth/login/profile", { familyCode: "TESTFAM", userId: "parent", pin: "4321" })).status).toBe(401);
+    expect((await post("/api/auth/profile", cookie, { pin: "4321", relation: "FATHER" })).status).toBe(200);
+    expect((await publicPost("/api/auth/login/profile", { familyCode: "TESTFAM", userId: "parent", pin: "4321" })).status).toBe(200);
+    const member = await env.DB.prepare("SELECT relation FROM family_members WHERE user_id = 'parent'").first<{ relation: string }>();
+    expect(member?.relation).toBe("FATHER");
+  });
+
+  it("does not sign in a member of another family", async () => {
+    await setupFamily();
+    await env.DB.prepare("INSERT INTO families (id, name, join_code) VALUES ('fam_other', 'Other', 'OTHER')").run();
+    const kid = await env.DB.prepare("SELECT user_id FROM children WHERE display_name = 'Kid'").first<{ user_id: string }>();
+    expect((await publicPost("/api/auth/login/profile", { familyCode: "OTHER", userId: kid?.user_id, pin: "1111" })).status).toBe(401);
+  });
+
+  it("adds a second parent who signs in with a PIN and can award points", async () => {
+    const cookie = await setupFamily();
+    const response = await post("/api/parents", cookie, { familyId: "fam_test", displayName: "Mom", relation: "MOTHER", pin: "5555" });
+    expect(response.status).toBe(201);
+    const { parent } = await response.json() as { parent: { id: string } };
+
+    const login = await publicPost("/api/auth/login/profile", { familyCode: "TESTFAM", userId: parent.id, pin: "5555" });
+    expect(login.status).toBe(200);
+    const momCookie = login.headers.get("set-cookie")!.split(";")[0];
+    expect((await post("/api/points", momCookie, { childId: "child", type: "EARN", amount: 10, reason: "ช่วยงาน" })).status).toBe(201);
+  });
+
+  it("stores a child avatar only for the parent's own child", async () => {
+    const cookie = await setupFamily();
+    const avatarUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+    expect((await post("/api/children/avatar", cookie, { childId: "child", avatarUrl })).status).toBe(200);
+    const row = await env.DB.prepare("SELECT avatar_url FROM children WHERE id = 'child'").first<{ avatar_url: string }>();
+    expect(row?.avatar_url).toBe(avatarUrl);
+
+    expect((await post("/api/children/avatar", cookie, { childId: "child", avatarUrl: "https://evil.example/x.png" })).status).toBe(400);
+    expect((await post("/api/children/avatar", await sessionCookie("child-user"), { childId: "child", avatarUrl })).status).toBe(403);
+    await env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')").run();
+    await env.DB.prepare("UPDATE children SET family_id = 'fam_other' WHERE id = 'child'").run();
+    expect((await post("/api/children/avatar", cookie, { childId: "child", avatarUrl })).status).toBe(404);
+  });
+});

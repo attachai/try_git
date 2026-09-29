@@ -19,6 +19,25 @@ const childLoginSchema = z.object({
   pin: z.string().regex(/^\d{4,8}$/),
 });
 
+const familyLookupSchema = z.object({
+  familyCode: z.string().trim().min(4).max(20),
+});
+
+const profileLoginSchema = z.object({
+  familyCode: z.string().trim().min(4).max(20),
+  userId: z.string().min(1),
+  pin: z.string().regex(/^\d{4,8}$/),
+});
+
+export const parentRelationSchema = z.enum(["FATHER", "MOTHER", "GUARDIAN"]);
+
+const profileUpdateSchema = z.object({
+  pin: z.string().regex(/^\d{4,8}$/).optional(),
+  relation: parentRelationSchema.optional(),
+}).refine((value) => value.pin !== undefined || value.relation !== undefined, {
+  message: "Nothing to update.",
+});
+
 const bootstrapSchema = z.object({
   familyName: z.string().trim().min(2).max(100),
   familyCode: z.string().trim().min(4).max(20).optional(),
@@ -169,6 +188,80 @@ export async function authRoutes(request: Request, env: Env, pathname: string) {
     if (!user) return error(404, "DEMO_USER_MISSING", "Run demo seed first.");
 
     return issueSession(env, user);
+  }
+
+  if (pathname === "/api/auth/family" && request.method === "POST") {
+    const parsed = familyLookupSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid family code.");
+
+    const family = await env.DB.prepare("SELECT id, name, join_code FROM families WHERE join_code = ?")
+      .bind(normalizedCode(parsed.data.familyCode))
+      .first<{ id: string; name: string; join_code: string }>();
+    if (!family) return error(404, "FAMILY_NOT_FOUND", "ไม่พบ Family Code นี้");
+
+    // Parents sign in with pin_hash, children with password_hash (their PIN).
+    const profiles = await env.DB.prepare(
+      `SELECT u.id, u.display_name, u.role, fm.relation, c.avatar_url,
+              CASE WHEN (u.role = 'PARENT' AND u.pin_hash IS NOT NULL)
+                     OR (u.role = 'CHILD' AND u.password_hash IS NOT NULL) THEN 1 ELSE 0 END AS has_pin
+       FROM family_members fm
+       JOIN users u ON u.id = fm.user_id
+       LEFT JOIN children c ON c.user_id = u.id
+       WHERE fm.family_id = ?
+       ORDER BY CASE fm.relation WHEN 'FATHER' THEN 0 WHEN 'MOTHER' THEN 1 WHEN 'GUARDIAN' THEN 2 ELSE 3 END,
+                fm.created_at ASC`,
+    ).bind(family.id).all();
+
+    return json({ family: { name: family.name, family_code: family.join_code }, profiles: profiles.results });
+  }
+
+  if (pathname === "/api/auth/login/profile" && request.method === "POST") {
+    const parsed = profileLoginSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid profile or PIN.");
+
+    const user = await env.DB.prepare(
+      `SELECT u.id, u.display_name, u.role, u.password_hash, u.pin_hash
+       FROM families f
+       JOIN family_members fm ON fm.family_id = f.id
+       JOIN users u ON u.id = fm.user_id
+       WHERE f.join_code = ? AND u.id = ?`,
+    ).bind(normalizedCode(parsed.data.familyCode), parsed.data.userId).first<{
+      id: string;
+      display_name: string;
+      role: "PARENT" | "CHILD";
+      password_hash: string | null;
+      pin_hash: string | null;
+    }>();
+
+    const secret = user?.role === "PARENT" ? user.pin_hash : user?.password_hash;
+    if (!user || !(await verifySecret(parsed.data.pin, secret))) {
+      return error(401, "INVALID_CREDENTIALS", "PIN ไม่ถูกต้อง");
+    }
+
+    return issueSession(env, { id: user.id, display_name: user.display_name, role: user.role });
+  }
+
+  if (pathname === "/api/auth/profile" && request.method === "POST") {
+    const user = await getSessionUser(request, env);
+    if (!user) return error(401, "UNAUTHENTICATED", "Please sign in.");
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+
+    const parsed = profileUpdateSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid profile update.");
+
+    const statements: D1PreparedStatement[] = [];
+    if (parsed.data.pin !== undefined) {
+      statements.push(env.DB.prepare("UPDATE users SET pin_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(await hashSecret(parsed.data.pin), user.id));
+    }
+    if (parsed.data.relation !== undefined) {
+      statements.push(env.DB.prepare(
+        "UPDATE family_members SET relation = ? WHERE user_id = ? AND relation IN ('FATHER','MOTHER','GUARDIAN')",
+      ).bind(parsed.data.relation, user.id));
+    }
+    await env.DB.batch(statements);
+
+    return json({ ok: true });
   }
 
   if (pathname === "/api/auth/logout" && request.method === "POST") {

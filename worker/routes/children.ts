@@ -3,7 +3,25 @@ import type { Env } from "../types";
 import { error, json, readJson } from "../lib/http";
 import { hashSecret } from "../lib/password";
 import { getSessionUser } from "../lib/session";
-import { generatedCode, normalizedCode } from "./auth";
+import { generatedCode, normalizedCode, parentRelationSchema } from "./auth";
+
+// Avatars are stored inline as small data URLs; the browser resizes before upload.
+const AVATAR_MAX_CHARS = 200 * 1024;
+
+const addParentSchema = z.object({
+  familyId: z.string().min(1),
+  displayName: z.string().trim().min(1).max(80),
+  relation: parentRelationSchema,
+  pin: z.string().regex(/^\d{4,8}$/),
+});
+
+const avatarSchema = z.object({
+  childId: z.string().min(1),
+  avatarUrl: z.string()
+    .max(AVATAR_MAX_CHARS)
+    .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/)
+    .nullable(),
+});
 
 const addChildSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
@@ -54,9 +72,68 @@ export async function childrenRoutes(request: Request, env: Env, pathname: strin
        JOIN family_members fm ON fm.family_id = f.id
        WHERE fm.user_id = ? AND fm.relation IN ('FATHER','MOTHER','GUARDIAN')
        ORDER BY f.created_at ASC`,
-    ).bind(user.id).all();
+    ).bind(user.id).all<{ id: string; name: string; family_code: string | null }>();
 
-    return json({ families: result.results });
+    const members = await env.DB.prepare(
+      `SELECT fm.family_id, u.id AS user_id, u.display_name, u.role, fm.relation, c.id AS child_id, c.avatar_url,
+              CASE WHEN (u.role = 'PARENT' AND u.pin_hash IS NOT NULL)
+                     OR (u.role = 'CHILD' AND u.password_hash IS NOT NULL) THEN 1 ELSE 0 END AS has_pin
+       FROM family_members fm
+       JOIN users u ON u.id = fm.user_id
+       LEFT JOIN children c ON c.user_id = u.id
+       WHERE fm.family_id IN (
+         SELECT family_id FROM family_members
+         WHERE user_id = ? AND relation IN ('FATHER','MOTHER','GUARDIAN')
+       )
+       ORDER BY fm.created_at ASC`,
+    ).bind(user.id).all<{ family_id: string }>();
+
+    return json({
+      families: result.results.map((family) => ({
+        ...family,
+        members: members.results.filter((member) => member.family_id === family.id),
+      })),
+    });
+  }
+
+  if (pathname === "/api/parents" && request.method === "POST") {
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+
+    const parsed = addParentSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid parent data.");
+    const family = await parentFamily(env, user.id, parsed.data.familyId);
+    if (!family) return error(404, "FAMILY_NOT_FOUND", "Family not found.");
+
+    // Parents added here have no email; they sign in with the profile picker PIN only.
+    const parentId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO users (id, email, password_hash, pin_hash, display_name, role) VALUES (?, NULL, NULL, ?, ?, 'PARENT')",
+      ).bind(parentId, await hashSecret(parsed.data.pin), parsed.data.displayName),
+      env.DB.prepare(
+        "INSERT INTO family_members (id, family_id, user_id, relation) VALUES (?, ?, ?, ?)",
+      ).bind(crypto.randomUUID(), family.id, parentId, parsed.data.relation),
+    ]);
+
+    return json({ parent: { id: parentId, display_name: parsed.data.displayName, relation: parsed.data.relation } }, { status: 201 });
+  }
+
+  if (pathname === "/api/children/avatar" && request.method === "POST") {
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+
+    const parsed = avatarSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "รูปต้องเป็น JPEG, PNG หรือ WebP และไม่เกิน 200 KB");
+
+    const result = await env.DB.prepare(
+      `UPDATE children SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND family_id IN (
+         SELECT family_id FROM family_members
+         WHERE user_id = ? AND relation IN ('FATHER','MOTHER','GUARDIAN')
+       )`,
+    ).bind(parsed.data.avatarUrl, parsed.data.childId, user.id).run();
+    if (!result.meta.changes) return error(404, "CHILD_NOT_FOUND", "Child not found in your family.");
+
+    return json({ ok: true });
   }
 
   if (pathname === "/api/children" && request.method === "POST") {
