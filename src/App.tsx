@@ -23,6 +23,18 @@ type PendingAction =
   | { kind: "evolve"; item: CollectionItem }
   | null;
 
+const EARN_REASONS = [
+  "ทำการบ้าน", "อ่านหนังสือ", "ช่วยงานบ้าน", "ตื่นตรงเวลา", "เก็บของเล่น", "มีน้ำใจ",
+  "แปรงฟันเอง", "อาบน้ำแต่งตัวเอง", "กินข้าวหมด", "เข้านอนตรงเวลา", "ช่วยดูแลน้อง",
+  "พูดจาสุภาพ", "ทำตามข้อตกลง", "ออกกำลังกาย", "ฝึกดนตรีหรือกีฬา", "ได้คำชมจากคุณครู",
+];
+const DEDUCT_REASONS = [
+  "เล่นเกมเกินเวลาที่ตกลง", "ไม่เก็บของหลังเล่น", "ไม่ทำการบ้าน", "ตื่นสาย", "ทะเลาะกับพี่น้อง",
+  "พูดจาไม่สุภาพ", "ไม่ทำตามข้อตกลง", "โกหก", "ดูจอเกินเวลา", "กินข้าวไม่หมด",
+  "เข้านอนเกินเวลา", "ไม่ช่วยงานบ้าน",
+];
+const OTHER_REASON = "อื่นๆ";
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -43,7 +55,8 @@ export default function App() {
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [mode, setMode] = useState<"EARN" | "DEDUCT">("EARN");
   const [amount, setAmount] = useState(50);
-  const [reason, setReason] = useState("ทำการบ้าน");
+  const [reason, setReason] = useState(EARN_REASONS[0]);
+  const [customReason, setCustomReason] = useState("");
   const [message, setMessage] = useState("");
   const [childTab, setChildTab] = useState<ChildTab>("home");
   const [parentTab, setParentTab] = useState<ParentTab>("home");
@@ -62,6 +75,16 @@ export default function App() {
     () => (user?.role === "PARENT" ? children.find((c) => c.id === selectedChildId) ?? null : child),
     [children, selectedChildId, child, user],
   );
+  const reasonOptions = mode === "EARN" ? EARN_REASONS : DEDUCT_REASONS;
+  const isOtherReason = reason === OTHER_REASON;
+  // The API requires 2-240 characters after trimming.
+  const finalReason = isOtherReason ? (customReason.trim().length >= 2 ? customReason.trim() : "") : reason;
+
+  function changeMode(next: "EARN" | "DEDUCT") {
+    setMode(next);
+    setReason((next === "EARN" ? EARN_REASONS : DEDUCT_REASONS)[0]);
+    setCustomReason("");
+  }
 
   async function refreshHistory(targetId: string) {
     const data = await api<{ history: HistoryItem[] }>("/api/children/" + targetId + "/history");
@@ -169,15 +192,16 @@ export default function App() {
 
   async function submitPoints(event: FormEvent) {
     event.preventDefault();
-    if (!activeChild || busy) return;
+    if (!activeChild || busy || !finalReason) return;
 
     try {
       setBusy(true);
       setMessage("");
       await api("/api/points", {
         method: "POST",
-        body: JSON.stringify({ childId: activeChild.id, amount, reason, type: mode }),
+        body: JSON.stringify({ childId: activeChild.id, amount, reason: finalReason, type: mode }),
       });
+      setCustomReason("");
       const data = await api<{ children: Child[] }>("/api/children");
       setChildren(data.children);
       await refreshHistory(activeChild.id);
@@ -332,8 +356,8 @@ export default function App() {
                   </div>
                 </div>
                 <div className="segmented">
-                  <button className={mode === "EARN" ? "active" : ""} onClick={() => setMode("EARN")}>＋ ให้คะแนน</button>
-                  <button className={mode === "DEDUCT" ? "active danger" : ""} onClick={() => setMode("DEDUCT")}>－ หักคะแนน</button>
+                  <button className={mode === "EARN" ? "active" : ""} onClick={() => changeMode("EARN")}>＋ ให้คะแนน</button>
+                  <button className={mode === "DEDUCT" ? "active danger" : ""} onClick={() => changeMode("DEDUCT")}>－ หักคะแนน</button>
                 </div>
 
                 <form className="point-form" onSubmit={submitPoints}>
@@ -345,19 +369,26 @@ export default function App() {
                     ))}
                   </div>
                   <label>
-                    เหตุผล
+                    {mode === "EARN" ? "เหตุผลที่ให้คะแนน" : "เหตุผลที่หักคะแนน"}
                     <select value={reason} onChange={(e) => setReason(e.target.value)}>
-                      <option>ทำการบ้าน</option>
-                      <option>อ่านหนังสือ</option>
-                      <option>ช่วยงานบ้าน</option>
-                      <option>ตื่นตรงเวลา</option>
-                      <option>เก็บของเล่น</option>
-                      <option>มีน้ำใจ</option>
-                      <option>เล่นเกมเกินเวลาที่ตกลง</option>
-                      <option>ไม่เก็บของหลังเล่น</option>
+                      {reasonOptions.map((option) => <option key={option}>{option}</option>)}
+                      <option value={OTHER_REASON}>อื่นๆ (ระบุเอง)</option>
                     </select>
                   </label>
-                  <button disabled={busy} className={mode === "EARN" ? "submit-button earn" : "submit-button deduct"} type="submit">
+                  {isOtherReason && (
+                    <label>
+                      ระบุเหตุผล
+                      <input
+                        className="reason-input"
+                        value={customReason}
+                        onChange={(e) => setCustomReason(e.target.value)}
+                        placeholder={mode === "EARN" ? "เช่น ช่วยคุณยายยกของ" : "เช่น ออกไปเล่นโดยไม่บอก"}
+                        maxLength={240}
+                        autoFocus
+                      />
+                    </label>
+                  )}
+                  <button disabled={busy || !finalReason} className={mode === "EARN" ? "submit-button earn" : "submit-button deduct"} type="submit">
                     {busy ? "กำลังบันทึก..." : mode === "EARN" ? "เพิ่ม " + amount + " คะแนน" : "หัก " + amount + " คะแนน"}
                   </button>
                 </form>
