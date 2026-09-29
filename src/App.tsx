@@ -36,6 +36,8 @@ const DEDUCT_REASONS = [
 ];
 const OTHER_REASON = "อื่นๆ";
 const NEW_FAMILY = "__new";
+const CUSTOM_AMOUNT_MIN = 10;
+const CUSTOM_AMOUNT_MAX = 1000;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -57,6 +59,7 @@ export default function App() {
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [mode, setMode] = useState<"EARN" | "DEDUCT">("EARN");
   const [amount, setAmount] = useState(50);
+  const [customAmount, setCustomAmount] = useState("");
   const [reason, setReason] = useState(EARN_REASONS[0]);
   const [customReason, setCustomReason] = useState("");
   const [families, setFamilies] = useState<Family[]>([]);
@@ -88,6 +91,11 @@ export default function App() {
   const isOtherReason = reason === OTHER_REASON;
   // The API requires 2-240 characters after trimming.
   const finalReason = isOtherReason ? (customReason.trim().length >= 2 ? customReason.trim() : "") : reason;
+  const parsedCustomAmount = Number(customAmount);
+  const isCustomAmount = customAmount !== "";
+  const customAmountValid = Number.isInteger(parsedCustomAmount)
+    && parsedCustomAmount >= CUSTOM_AMOUNT_MIN && parsedCustomAmount <= CUSTOM_AMOUNT_MAX;
+  const finalAmount = isCustomAmount ? (customAmountValid ? parsedCustomAmount : null) : amount;
 
   function changeMode(next: "EARN" | "DEDUCT") {
     setMode(next);
@@ -249,16 +257,17 @@ export default function App() {
 
   async function submitPoints(event: FormEvent) {
     event.preventDefault();
-    if (!activeChild || busy || !finalReason) return;
+    if (!activeChild || busy || !finalReason || finalAmount === null) return;
 
     try {
       setBusy(true);
       setMessage("");
       await api("/api/points", {
         method: "POST",
-        body: JSON.stringify({ childId: activeChild.id, amount, reason: finalReason, type: mode }),
+        body: JSON.stringify({ childId: activeChild.id, amount: finalAmount, reason: finalReason, type: mode }),
       });
       setCustomReason("");
+      setCustomAmount("");
       const data = await api<{ children: Child[] }>("/api/children");
       setChildren(data.children);
       await refreshHistory(activeChild.id);
@@ -486,11 +495,33 @@ export default function App() {
                 <form className="point-form" onSubmit={submitPoints}>
                   <div className="quick-grid">
                     {[10, 20, 50, 100].map((value) => (
-                      <button type="button" className={amount === value ? "quick selected" : "quick"} key={value} onClick={() => setAmount(value)}>
+                      <button
+                        type="button"
+                        className={!isCustomAmount && amount === value ? "quick selected" : "quick"}
+                        key={value}
+                        onClick={() => { setAmount(value); setCustomAmount(""); }}
+                      >
                         {mode === "EARN" ? "+" : "-"}{value}
                       </button>
                     ))}
                   </div>
+                  <label>
+                    หรือพิมพ์จำนวนเอง ({CUSTOM_AMOUNT_MIN}-{CUSTOM_AMOUNT_MAX})
+                    <input
+                      className={isCustomAmount && !customAmountValid ? "reason-input invalid" : "reason-input"}
+                      type="number"
+                      inputMode="numeric"
+                      min={CUSTOM_AMOUNT_MIN}
+                      max={CUSTOM_AMOUNT_MAX}
+                      step={1}
+                      value={customAmount}
+                      onChange={(e) => setCustomAmount(e.target.value)}
+                      placeholder={"เช่น " + (mode === "EARN" ? "250" : "30")}
+                    />
+                    {isCustomAmount && !customAmountValid && (
+                      <small className="field-error">ใส่จำนวนเต็มระหว่าง {CUSTOM_AMOUNT_MIN} ถึง {CUSTOM_AMOUNT_MAX}</small>
+                    )}
+                  </label>
                   <label>
                     {mode === "EARN" ? "เหตุผลที่ให้คะแนน" : "เหตุผลที่หักคะแนน"}
                     <select value={reason} onChange={(e) => setReason(e.target.value)}>
@@ -511,8 +542,8 @@ export default function App() {
                       />
                     </label>
                   )}
-                  <button disabled={busy || !finalReason} className={mode === "EARN" ? "submit-button earn" : "submit-button deduct"} type="submit">
-                    {busy ? "กำลังบันทึก..." : mode === "EARN" ? "เพิ่ม " + amount + " คะแนน" : "หัก " + amount + " คะแนน"}
+                  <button disabled={busy || !finalReason || finalAmount === null} className={mode === "EARN" ? "submit-button earn" : "submit-button deduct"} type="submit">
+                    {busy ? "กำลังบันทึก..." : finalAmount === null ? "ใส่จำนวนคะแนนให้ถูกต้อง" : mode === "EARN" ? "เพิ่ม " + finalAmount + " คะแนน" : "หัก " + finalAmount + " คะแนน"}
                   </button>
                 </form>
               </section>

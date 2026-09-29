@@ -58,6 +58,8 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .family-card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 4px 14px 12px; }
 .family-card p { margin: 6px 0 0; }
 .family-code { font-size: 12px; font-weight: 900; letter-spacing: .08em; background: #eef2ff; color: #4338ca; padding: 5px 9px; border-radius: 999px; }
+.reason-input.invalid { border-color: #dc2626; }
+.field-error { color: #b91c1c; font-weight: 600; }
 .child-picker { margin-bottom: 14px; }
 .submit-button { border: 0; border-radius: 16px; padding: 15px; color: white; font-weight: 900; }
 .submit-button.earn { background: #16a34a; }
