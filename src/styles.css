@@ -179,3 +179,27 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .member-row small { color: #64748b; }
 .avatar-upload { border: 1px solid #c7d2fe; color: #4338ca; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; }
 .avatar-upload input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.bottom-nav button { position: relative; }
+.nav-badge { position: absolute; top: 4px; right: calc(50% - 22px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #dc2626; color: white; font-size: 11px; font-style: normal; font-weight: 900; line-height: 18px; }
+.streak-banner { display: flex; align-items: center; gap: 12px; margin: 12px 0 14px; padding: 12px 14px; border-radius: 18px; background: #f1f5f9; }
+.streak-banner.active { background: linear-gradient(135deg, #fff7ed, #ffedd5); box-shadow: inset 0 0 0 1px #fdba74; }
+.streak-banner > div { display: grid; gap: 2px; }
+.streak-banner small { color: #64748b; }
+.streak-fire { font-size: 30px; filter: grayscale(1); }
+.streak-banner.active .streak-fire { filter: none; }
+.quest-list { display: grid; gap: 10px; }
+.quest-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 16px; background: white; }
+.quest-row.done { background: #f0fdf4; border-color: #bbf7d0; }
+.quest-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.quest-text small { color: #64748b; }
+.quest-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.quest-button { border: 0; border-radius: 12px; padding: 9px 12px; font-weight: 900; }
+.quest-button.approve { background: #16a34a; color: white; }
+.quest-button.reject { background: #fee2e2; color: #b91c1c; }
+.quest-button.remove { background: transparent; padding: 9px 6px; }
+.quest-button:disabled { opacity: .5; }
+.quest-state { font-size: 13px; font-weight: 800; }
+.quest-state.done { color: #15803d; }
+.quest-state.pending { color: #b45309; }
+.idea-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
+.idea-chip { border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: #334155; }

@@ -89,6 +89,19 @@ Evolution atomically:
 3. creates evolved owned character
 4. inserts evolution audit record
 
+## Daily quests
+
+Parents define repeatable quests for one child or every child in a family. Days are counted in Thailand time (UTC+7).
+
+- `GET /api/quests` (child) or `GET /api/quests?childId=` (parent): today's quests with each one's status (`null`, `PENDING`, `APPROVED`, `REJECTED`) and the streak (`current`, `today_done`, `next_milestone`, `next_bonus`)
+- `GET /api/quests/pending` (parent): completions waiting for approval across the parent's families
+- `POST /api/quests` (parent) `{ childId, forAllChildren, title, points }`: points 5-500
+- `POST /api/quests/archive` (parent) `{ questId }`
+- `POST /api/quests/complete` `{ questId, childId? }`: a child submits for approval. A parent marks it done and approves it right away. A rejected quest can be submitted again
+- `POST /api/quests/review` (parent) `{ completionId, approve }`
+
+Approval inserts an `EARN` ledger row with `reference_type = 'QUEST'`. A streak day is any day with at least one approved quest. Reaching 3, 7, 14 or 30 days in a row pays +20, +50, +100 or +200 as a `STREAK` ledger row. A unique index on `(reference_type, reference_id)` makes each quest completion and each streak day pay out once.
+
 ## Error shape
 
 ```json
