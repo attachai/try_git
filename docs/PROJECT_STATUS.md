@@ -3,66 +3,79 @@
 ## Phase 0 — Project scaffolding
 Status: COMPLETE
 
-- React + TypeScript + Vite shell
-- Cloudflare Worker entrypoint
-- D1 binding configuration placeholder
-- Mobile-first dashboard shell
-- Architecture/deployment documentation
-
 ## Phase 1 — D1 schema and migrations
 Status: COMPLETE
-
-- Initial D1 migration
-- Ledger-oriented point model
-- Character/evolution schema
-- Demo seed data
-- Core indexes and foreign keys
 
 ## Phase 2 — Authentication + family ownership
 Status: MVP COMPLETE
 
-- Server-side session table and HttpOnly cookie
-- Demo parent/child sign-in for non-production environments
-- /api/auth/me
-- /api/auth/logout
-- Parent/child role enforcement
-- Family ownership checks on parent operations
+- HttpOnly server session
+- Non-production Parent/Child demo login
+- Server-side role enforcement
+- Family ownership checks
 
-Production credential authentication is intentionally deferred; demo login returns 404 when ENVIRONMENT=production.
+Production credential authentication is intentionally deferred.
 
 ## Phase 3 — Parent point management
 Status: MVP COMPLETE
 
-- Parent can award points
-- Parent can deduct points
+- Award/deduct points
 - Zod validation
-- Ownership enforcement
-- D1 trigger applies ledger entry to balance atomically
-- D1 trigger rejects negative resulting balance
-- Reason stored in audit history
+- Permanent ledger
+- D1 trigger updates balance atomically
+- Negative balances rejected
 
 ## Phase 4 — Child dashboard + history
 Status: MVP COMPLETE
 
-- Parent reads children from D1
-- Child reads own profile only
-- Parent and child history API
-- React dashboard consumes real API data
-- Child cannot mutate points
+- Parent and child read scopes
+- History API
+- Real D1-backed React UI
+- Child cannot manually alter points
 
-## Important architecture improvement
+## Phase 5 — Character catalog/shop
+Status: MVP COMPLETE
 
-From migration 0002 onward, point balance changes are driven by insertion into point_transactions.
-The database trigger updates children.points_balance in the same statement transaction, preventing a balance/history split.
+- D1-backed shop catalog
+- Pokémon prototype artwork URLs isolated as data
+- Type and rarity presentation
+- Owned-state indication
+
+## Phase 6 — Purchase transaction
+Status: MVP COMPLETE
+
+- Child-only purchase endpoint
+- Balance debit through ledger
+- D1 batch transaction for ledger + ownership + audit record
+- Insufficient balance rollback
+- Duplicate owned-character protection
+
+Cloudflare documents D1 batch statements as transactional and rolled back when a statement fails.
+
+## Phase 7 — Collection + evolution
+Status: MVP COMPLETE
+
+- Child collection API and UI
+- Current ownership state
+- Evolution paths and costs
+- Pikachu -> Raichu
+- Charmander -> Charmeleon -> Charizard
+- Squirtle -> Wartortle -> Blastoise
+- Bulbasaur -> Ivysaur -> Venusaur
+- Atomic evolution ledger/ownership/audit batch
+- Evolved source retained for lineage with status EVOLVED
 
 ## Not implemented yet
-- Production password/passkey login
-- Shop API
-- Purchase transaction
-- Collection/evolution API
+
+- Production password/passkey/magic-link login
 - Automated tests
+- UX animations/celebration
 - Production D1 database ID
 - Cloudflare deployment
+- Original/licensed character artwork for public/commercial use
 
 ## Next
-Phase 5-7: character catalog/shop, atomic purchase flow, collection and evolution.
+
+Phase 8: UI polish, navigation, celebration/evolution animation.
+Phase 9: automated tests and security review.
+Phase 10: create production D1 database and deploy to Cloudflare.
