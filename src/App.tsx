@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfirmDialog from "./components/ConfirmDialog";
 import ProfileLogin from "./components/ProfileLogin";
+import QuestBoard from "./components/QuestBoard";
 import { api } from "./lib/api";
 import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
 
@@ -26,7 +27,7 @@ type CollectionItem = {
   evolution_cost?: number | null; evolution_name?: string | null; evolution_image_url?: string | null;
 };
 type ChildTab = "home" | "shop" | "collection" | "history";
-type ParentTab = "home" | "history" | "family";
+type ParentTab = "home" | "quests" | "history" | "family";
 type PendingAction =
   | { kind: "purchase"; character: ShopCharacter }
   | { kind: "evolve"; item: CollectionItem }
@@ -98,6 +99,7 @@ export default function App() {
   const [parentTab, setParentTab] = useState<ParentTab>("home");
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [celebration, setCelebration] = useState<{ title: string; detail: string } | null>(null);
+  const [pendingQuestCount, setPendingQuestCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
 
@@ -138,6 +140,21 @@ export default function App() {
     await refreshHistory(profile.child.id);
   }
 
+  async function refreshPendingQuests() {
+    const data = await api<{ pending: unknown[] }>("/api/quests/pending");
+    setPendingQuestCount(data.pending.length);
+  }
+
+  async function refreshAfterQuest() {
+    if (user?.role === "PARENT") {
+      const data = await api<{ children: Child[] }>("/api/children");
+      setChildren(data.children);
+      await Promise.all([refreshPendingQuests(), selectedChildId ? refreshHistory(selectedChildId) : Promise.resolve()]);
+    } else {
+      await refreshChildGame();
+    }
+  }
+
   async function loadDashboard(currentUser: User) {
     if (currentUser.role === "PARENT") {
       const [data, familyData] = await Promise.all([
@@ -147,6 +164,7 @@ export default function App() {
       setChildren(data.children);
       setFamilies(familyData.families);
       if (familyData.families[0]) setAddFamilyId(familyData.families[0].id);
+      refreshPendingQuests().catch(() => undefined);
       const first = data.children[0];
       if (first) {
         setSelectedChildId(first.id);
@@ -626,6 +644,26 @@ export default function App() {
               </section>
             )}
 
+            {user.role === "PARENT" && parentTab === "quests" && (
+              <QuestBoard
+                role="PARENT"
+                childId={activeChild.id}
+                childName={activeChild.display_name}
+                onChanged={refreshAfterQuest}
+                onCelebrate={(title, detail) => setCelebration({ title, detail })}
+              />
+            )}
+
+            {isChild && childTab === "home" && (
+              <QuestBoard
+                role="CHILD"
+                childId={activeChild.id}
+                childName={activeChild.display_name}
+                onChanged={refreshAfterQuest}
+                onCelebrate={(title, detail) => setCelebration({ title, detail })}
+              />
+            )}
+
             {isChild && childTab === "home" && (
               <section className="game-stats">
                 <button className="stat-card" onClick={() => setChildTab("collection")}>
@@ -723,6 +761,10 @@ export default function App() {
         ) : (
           <>
             <button className={parentTab === "home" ? "active" : ""} onClick={() => setParentTab("home")}><span>⭐</span>คะแนน</button>
+            <button className={parentTab === "quests" ? "active" : ""} onClick={() => setParentTab("quests")}>
+              <span>🎯</span>ภารกิจ
+              {pendingQuestCount > 0 && <em className="nav-badge" aria-label={pendingQuestCount + " รายการรอยืนยัน"}>{pendingQuestCount}</em>}
+            </button>
             <button className={parentTab === "history" ? "active" : ""} onClick={() => setParentTab("history")}><span>📜</span>ประวัติ</button>
             <button className={parentTab === "family" ? "active" : ""} onClick={() => setParentTab("family")}><span>👨‍👩‍👧</span>ครอบครัว</button>
           </>

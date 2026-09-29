@@ -3,6 +3,8 @@ import { env, SELF } from "cloudflare:test";
 
 async function resetDb() {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM quest_completions"),
+    env.DB.prepare("DELETE FROM quests"),
     env.DB.prepare("DELETE FROM evolution_transactions"),
     env.DB.prepare("DELETE FROM purchase_transactions"),
     env.DB.prepare("DELETE FROM child_characters"),
@@ -257,5 +259,118 @@ describe("profile picker login", () => {
     await env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')").run();
     await env.DB.prepare("UPDATE children SET family_id = 'fam_other' WHERE id = 'child'").run();
     expect((await post("/api/children/avatar", cookie, { childId: "child", avatarUrl })).status).toBe(404);
+  });
+});
+
+describe("daily quests and streaks", () => {
+  function get(path: string, cookie: string) {
+    return SELF.fetch("https://example.test" + path, { headers: { cookie } });
+  }
+
+  function thaiDay(offsetDays = 0) {
+    return new Date(Date.now() + 7 * 3600 * 1000 + offsetDays * 86400 * 1000).toISOString().slice(0, 10);
+  }
+
+  async function createQuest(cookie: string, title = "แปรงฟัน", points = 10) {
+    const response = await post("/api/quests", cookie, { childId: "child", forAllChildren: true, title, points });
+    expect(response.status).toBe(201);
+    return (await response.json() as { quest: { id: string } }).quest.id;
+  }
+
+  async function balance() {
+    return (await env.DB.prepare("SELECT points_balance FROM children WHERE id = 'child'").first<{ points_balance: number }>())!.points_balance;
+  }
+
+  it("child submits, parent approves once, and points are awarded", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    const questId = await createQuest(parent);
+
+    expect((await post("/api/quests/complete", kid, { questId })).status).toBe(201);
+    expect((await post("/api/quests/complete", kid, { questId })).status).toBe(409);
+    expect(await balance()).toBe(1000);
+
+    const { pending } = await (await get("/api/quests/pending", parent)).json() as { pending: { id: string }[] };
+    expect(pending).toHaveLength(1);
+    expect((await post("/api/quests/review", parent, { completionId: pending[0].id, approve: true })).status).toBe(200);
+    expect((await post("/api/quests/review", parent, { completionId: pending[0].id, approve: true })).status).toBe(409);
+    expect(await balance()).toBe(1010);
+
+    const today = await (await get("/api/quests", kid)).json() as { quests: { status: string }[]; streak: { current: number; today_done: boolean } };
+    expect(today.quests[0].status).toBe("APPROVED");
+    expect(today.streak).toMatchObject({ current: 1, today_done: true });
+  });
+
+  it("a rejected quest can be resubmitted", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    const questId = await createQuest(parent);
+    await post("/api/quests/complete", kid, { questId });
+    const { pending } = await (await get("/api/quests/pending", parent)).json() as { pending: { id: string }[] };
+    expect((await post("/api/quests/review", parent, { completionId: pending[0].id, approve: false })).status).toBe(200);
+    expect(await balance()).toBe(1000);
+    expect((await post("/api/quests/complete", kid, { questId })).status).toBe(201);
+  });
+
+  it("a parent can mark a quest done directly", async () => {
+    const parent = await sessionCookie("parent");
+    const questId = await createQuest(parent, "อ่านหนังสือ", 20);
+    const response = await post("/api/quests/complete", parent, { questId, childId: "child" });
+    expect(response.status).toBe(201);
+    expect(await balance()).toBe(1020);
+    expect((await post("/api/quests/complete", parent, { questId, childId: "child" })).status).toBe(409);
+  });
+
+  it("pays the 3-day streak bonus once", async () => {
+    const parent = await sessionCookie("parent");
+    const questId = await createQuest(parent);
+    const secondQuestId = await createQuest(parent, "เก็บของเล่น", 10);
+    for (const day of [thaiDay(-2), thaiDay(-1)]) {
+      await env.DB.prepare(
+        "INSERT INTO quest_completions (id, quest_id, child_id, day, status) VALUES (?, ?, 'child', ?, 'APPROVED')",
+      ).bind(crypto.randomUUID(), questId, day).run();
+    }
+
+    const response = await post("/api/quests/complete", parent, { questId, childId: "child" });
+    const body = await response.json() as { streakBonus: { days: number; points: number } | null };
+    expect(body.streakBonus).toEqual({ days: 3, points: 20 });
+    expect(await balance()).toBe(1000 + 10 + 20);
+
+    // A second quest on the same day doesn't pay the bonus again.
+    const again = await (await post("/api/quests/complete", parent, { questId: secondQuestId, childId: "child" })).json() as { streakBonus: unknown };
+    expect(again.streakBonus).toBeNull();
+    expect(await balance()).toBe(1000 + 10 + 20 + 10);
+
+    const status = await (await get("/api/quests?childId=child", parent)).json() as { streak: { current: number; next_milestone: number } };
+    expect(status.streak).toMatchObject({ current: 3, next_milestone: 7 });
+  });
+
+  it("keeps yesterday's streak alive until today ends", async () => {
+    const parent = await sessionCookie("parent");
+    const questId = await createQuest(parent);
+    await env.DB.prepare(
+      "INSERT INTO quest_completions (id, quest_id, child_id, day, status) VALUES (?, ?, 'child', ?, 'APPROVED')",
+    ).bind(crypto.randomUUID(), questId, thaiDay(-1)).run();
+    const status = await (await get("/api/quests?childId=child", parent)).json() as { streak: { current: number; today_done: boolean } };
+    expect(status.streak).toMatchObject({ current: 1, today_done: false });
+  });
+
+  it("only lets parents create, archive, and review quests in their own family", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    expect((await post("/api/quests", kid, { childId: "child", forAllChildren: true, title: "hack", points: 100 })).status).toBe(403);
+    const questId = await createQuest(parent);
+
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')"),
+      env.DB.prepare("INSERT INTO users (id, display_name, role) VALUES ('other-parent', 'Other', 'PARENT')"),
+      env.DB.prepare("INSERT INTO family_members (id, family_id, user_id, relation) VALUES ('fm-other', 'fam_other', 'other-parent', 'FATHER')"),
+    ]);
+    const outsider = await sessionCookie("other-parent");
+    expect((await post("/api/quests/archive", outsider, { questId })).status).toBe(404);
+    expect((await post("/api/quests/complete", outsider, { questId, childId: "child" })).status).toBe(404);
+
+    expect((await post("/api/quests/archive", parent, { questId })).status).toBe(200);
+    expect((await post("/api/quests/complete", kid, { questId })).status).toBe(404);
   });
 });
