@@ -10,6 +10,30 @@ type HistoryItem = {
   created_at: string;
   created_by_name?: string | null;
 };
+type ShopCharacter = {
+  id: string;
+  name: string;
+  slug: string;
+  type_primary: string;
+  type_secondary?: string | null;
+  image_url: string;
+  price: number;
+  rarity: string;
+  owned: number;
+};
+type CollectionItem = {
+  child_character_id: string;
+  character_id: string;
+  name: string;
+  slug: string;
+  type_primary: string;
+  type_secondary?: string | null;
+  image_url: string;
+  rarity: string;
+  evolution_cost?: number | null;
+  evolution_name?: string | null;
+  evolution_image_url?: string | null;
+};
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -24,9 +48,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [children, setChildren] = useState<Child[]>([]);
-  const [selectedChildId, setSelectedChildId] = useState<string>("");
+  const [selectedChildId, setSelectedChildId] = useState("");
   const [child, setChild] = useState<Child | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [shop, setShop] = useState<ShopCharacter[]>([]);
+  const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [mode, setMode] = useState<"EARN" | "DEDUCT">("EARN");
   const [amount, setAmount] = useState(50);
   const [reason, setReason] = useState("ทำการบ้าน");
@@ -42,6 +68,18 @@ export default function App() {
     setHistory(data.history);
   }
 
+  async function refreshChildGame() {
+    const [profile, shopData, collectionData] = await Promise.all([
+      api<{ child: Child }>("/api/child/me"),
+      api<{ characters: ShopCharacter[] }>("/api/shop"),
+      api<{ child: Child; collection: CollectionItem[] }>("/api/collection"),
+    ]);
+    setChild(profile.child);
+    setShop(shopData.characters);
+    setCollection(collectionData.collection);
+    await refreshHistory(profile.child.id);
+  }
+
   async function loadDashboard(currentUser: User) {
     if (currentUser.role === "PARENT") {
       const data = await api<{ children: Child[] }>("/api/children");
@@ -52,9 +90,7 @@ export default function App() {
         await refreshHistory(first.id);
       }
     } else {
-      const data = await api<{ child: Child }>("/api/child/me");
-      setChild(data.child);
-      await refreshHistory(data.child.id);
+      await refreshChildGame();
     }
   }
 
@@ -89,6 +125,8 @@ export default function App() {
     setChildren([]);
     setChild(null);
     setHistory([]);
+    setShop([]);
+    setCollection([]);
   }
 
   async function submitPoints(event: FormEvent) {
@@ -101,7 +139,6 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ childId: activeChild.id, amount, reason, type: mode }),
       });
-
       const data = await api<{ children: Child[] }>("/api/children");
       setChildren(data.children);
       await refreshHistory(activeChild.id);
@@ -111,13 +148,44 @@ export default function App() {
     }
   }
 
+  async function purchase(character: ShopCharacter) {
+    if (!confirm(`ซื้อ ${character.name} ด้วย ⭐ ${character.price} คะแนน?`)) return;
+    try {
+      setMessage("");
+      await api("/api/shop/purchase", {
+        method: "POST",
+        body: JSON.stringify({ characterId: character.id }),
+      });
+      await refreshChildGame();
+      setMessage(`ได้ ${character.name} เข้าคอลเลกชันแล้ว 🎉`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ซื้อไม่สำเร็จ");
+    }
+  }
+
+  async function evolve(item: CollectionItem) {
+    if (!item.evolution_name || !item.evolution_cost) return;
+    if (!confirm(`วิวัฒนาการ ${item.name} เป็น ${item.evolution_name} ด้วย ⭐ ${item.evolution_cost} คะแนน?`)) return;
+    try {
+      setMessage("");
+      await api("/api/collection/evolve", {
+        method: "POST",
+        body: JSON.stringify({ childCharacterId: item.child_character_id }),
+      });
+      await refreshChildGame();
+      setMessage(`${item.name} วิวัฒนาการเป็น ${item.evolution_name} แล้ว ✨`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "วิวัฒนาการไม่สำเร็จ");
+    }
+  }
+
   if (!user) {
     return (
       <main className="page-shell">
         <section className="login-card">
           <p className="eyebrow">Family Reward Game</p>
           <h1>เข้าสู่ Demo</h1>
-          <p className="muted">Phase 2–4 ใช้ demo session เพื่อทดสอบ flow ก่อนเชื่อมระบบ login production</p>
+          <p className="muted">เลือกมุมมองผู้ปกครองหรือเด็กเพื่อทดลองระบบคะแนนและร้านตัวละคร</p>
           <div className="login-actions">
             <button className="action action-positive" onClick={() => demoLogin("PARENT")}>เข้าเป็นผู้ปกครอง</button>
             <button className="action action-child" onClick={() => demoLogin("CHILD")}>เข้าเป็นเด็ก</button>
@@ -157,6 +225,8 @@ export default function App() {
             <div className="avatar" aria-hidden="true">🧒</div>
           </section>
 
+          {message && <p className="feedback global-feedback">{message}</p>}
+
           {user.role === "PARENT" && (
             <section className="panel">
               <div className="segmented">
@@ -190,9 +260,75 @@ export default function App() {
                 <button className={mode === "EARN" ? "submit-button earn" : "submit-button deduct"} type="submit">
                   {mode === "EARN" ? `เพิ่ม ${amount} คะแนน` : `หัก ${amount} คะแนน`}
                 </button>
-                {message && <p className="feedback">{message}</p>}
               </form>
             </section>
+          )}
+
+          {user.role === "CHILD" && (
+            <>
+              <section className="panel">
+                <div className="section-heading">
+                  <h2>My Collection</h2>
+                  <span>{collection.length} ตัว</span>
+                </div>
+                {collection.length === 0 ? (
+                  <p className="muted">ยังไม่มีตัวละคร ลองสะสมคะแนนแล้วเลือกตัวที่ชอบจากร้านด้านล่าง</p>
+                ) : (
+                  <div className="character-grid">
+                    {collection.map((item) => (
+                      <article className="character-card owned-card" key={item.child_character_id}>
+                        <div className="character-art image-art">
+                          <img src={item.image_url} alt={item.name} />
+                        </div>
+                        <div className="card-row">
+                          <h3>{item.name}</h3>
+                          <span className="rarity">{item.rarity}</span>
+                        </div>
+                        <p>{item.type_primary}{item.type_secondary ? ` / ${item.type_secondary}` : ""}</p>
+                        {item.evolution_name && item.evolution_cost ? (
+                          <button className="evolve-button" onClick={() => evolve(item)}>
+                            ✨ {item.evolution_name} · ⭐ {item.evolution_cost}
+                          </button>
+                        ) : (
+                          <div className="max-stage">MAX STAGE</div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="section-heading">
+                  <h2>Character Shop</h2>
+                  <span>ใช้คะแนนแลก</span>
+                </div>
+                <div className="character-grid">
+                  {shop.map((character) => (
+                    <article className="character-card" key={character.id}>
+                      <div className="character-art image-art">
+                        <img src={character.image_url} alt={character.name} />
+                      </div>
+                      <div className="card-row">
+                        <h3>{character.name}</h3>
+                        <span className="rarity">{character.rarity}</span>
+                      </div>
+                      <div className="type-row">
+                        <span className={`element element-${character.type_primary.toLowerCase()}`}>{character.type_primary}</span>
+                        {character.type_secondary && <span className="element">{character.type_secondary}</span>}
+                      </div>
+                      <button
+                        disabled={Boolean(character.owned)}
+                        className="buy-button"
+                        onClick={() => purchase(character)}
+                      >
+                        {character.owned ? "มีแล้ว ✓" : `ซื้อ · ⭐ ${character.price}`}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </>
           )}
 
           <section className="panel">
@@ -215,16 +351,6 @@ export default function App() {
               ))}
             </div>
           </section>
-
-          {user.role === "CHILD" && (
-            <section className="panel">
-              <div className="section-heading">
-                <h2>ร้านตัวละคร</h2>
-                <span>Phase 5</span>
-              </div>
-              <p className="muted">ระบบซื้อและวิวัฒนาการจะต่อจากคะแนนจริงชุดนี้ โดยเด็กไม่มีสิทธิ์แก้คะแนนเอง</p>
-            </section>
-          )}
         </>
       )}
     </main>
