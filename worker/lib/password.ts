@@ -12,7 +12,7 @@ function base64ToBytes(value: string) {
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
-async function derive(secret: string, salt: Uint8Array, iterations: number) {
+async function derive(secret: string, salt: BufferSource, iterations: number) {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
