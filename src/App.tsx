@@ -50,6 +50,13 @@ export default function App() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [celebration, setCelebration] = useState<{ title: string; detail: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
+  const [loginRole, setLoginRole] = useState<"PARENT" | "CHILD">("PARENT");
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentPassword, setParentPassword] = useState("");
+  const [familyCode, setFamilyCode] = useState("");
+  const [childName, setChildName] = useState("");
+  const [childPin, setChildPin] = useState("");
 
   const activeChild = useMemo(
     () => (user?.role === "PARENT" ? children.find((c) => c.id === selectedChildId) ?? null : child),
@@ -88,6 +95,10 @@ export default function App() {
   }
 
   useEffect(() => {
+    api<{ demoLoginEnabled: boolean }>("/api/auth/config")
+      .then((config) => setDemoLoginEnabled(config.demoLoginEnabled))
+      .catch(() => undefined);
+
     api<{ user: User }>("/api/auth/me")
       .then(async ({ user: currentUser }) => {
         setUser(currentUser);
@@ -107,6 +118,33 @@ export default function App() {
     const timer = window.setTimeout(() => setCelebration(null), 2400);
     return () => window.clearTimeout(timer);
   }, [celebration]);
+
+  async function productionLogin(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+
+    try {
+      setBusy(true);
+      setMessage("");
+
+      const data = loginRole === "PARENT"
+        ? await api<{ user: User }>("/api/auth/login/parent", {
+            method: "POST",
+            body: JSON.stringify({ email: parentEmail, password: parentPassword }),
+          })
+        : await api<{ user: User }>("/api/auth/login/child", {
+            method: "POST",
+            body: JSON.stringify({ familyCode, childName, pin: childPin }),
+          });
+
+      setUser(data.user);
+      await loadDashboard(data.user);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function demoLogin(role: "PARENT" | "CHILD") {
     setMessage("");
@@ -192,11 +230,57 @@ export default function App() {
           <div className="brand-mark">⭐</div>
           <p className="eyebrow">Family Reward Game</p>
           <h1>สะสมความดี<br />ปลดล็อกตัวโปรด</h1>
-          <p className="muted">Demo สำหรับทดลองมุมมองผู้ปกครองและเด็ก</p>
-          <div className="login-actions">
-            <button className="action action-positive" onClick={() => demoLogin("PARENT")}>👨‍👩‍👧 ผู้ปกครอง</button>
-            <button className="action action-child" onClick={() => demoLogin("CHILD")}>🎮 เด็ก</button>
+
+          <div className="segmented login-role-tabs">
+            <button className={loginRole === "PARENT" ? "active" : ""} onClick={() => setLoginRole("PARENT")}>👨‍👩‍👧 ผู้ปกครอง</button>
+            <button className={loginRole === "CHILD" ? "active" : ""} onClick={() => setLoginRole("CHILD")}>🎮 เด็ก</button>
           </div>
+
+          <form className="login-form" onSubmit={productionLogin}>
+            {loginRole === "PARENT" ? (
+              <>
+                <label>
+                  Email
+                  <input type="email" autoComplete="email" value={parentEmail} onChange={(e) => setParentEmail(e.target.value)} required />
+                </label>
+                <label>
+                  Password
+                  <input type="password" autoComplete="current-password" value={parentPassword} onChange={(e) => setParentPassword(e.target.value)} minLength={8} required />
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  Family Code
+                  <input value={familyCode} onChange={(e) => setFamilyCode(e.target.value.toUpperCase())} autoCapitalize="characters" required />
+                </label>
+                <label>
+                  ชื่อเด็ก
+                  <input value={childName} onChange={(e) => setChildName(e.target.value)} required />
+                </label>
+                <label>
+                  PIN
+                  <input type="password" inputMode="numeric" pattern="[0-9]{4,8}" value={childPin} onChange={(e) => setChildPin(e.target.value)} required />
+                </label>
+              </>
+            )}
+
+            <button className="submit-button earn" disabled={busy} type="submit">
+              {busy ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+            </button>
+          </form>
+
+          {message && <p className="feedback global-feedback">{message}</p>}
+
+          {demoLoginEnabled && (
+            <div className="demo-login-box">
+              <p className="muted">Development Demo</p>
+              <div className="login-actions">
+                <button className="action action-positive" onClick={() => demoLogin("PARENT")}>Demo ผู้ปกครอง</button>
+                <button className="action action-child" onClick={() => demoLogin("CHILD")}>Demo เด็ก</button>
+              </div>
+            </div>
+          )}
         </section>
       </main>
     );
