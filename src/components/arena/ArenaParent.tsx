@@ -16,6 +16,11 @@ const DIFFICULTY_HINT: Record<Difficulty, string> = {
   NORMAL: "ไม่มีตัวตำนาน พลังปกติ",
   HARD: "สุ่มได้ทุกตัว พลัง ×1.1",
 };
+const TOURNAMENT_HINT: Record<Difficulty, string> = {
+  EASY: "ศัตรูเบาลง ไม่มีตัวตำนาน · เหมาะกับมือใหม่",
+  NORMAL: "ศัตรูเก่งขึ้นทุกรอบ · รอบชิงอาจเจอตัวตำนาน",
+  HARD: "เจอตัว EPIC ตั้งแต่รอบแรก · รอบรองและรอบชิงเจอตัวตำนานได้",
+};
 
 type Props = { kids: { id: string; display_name: string }[] };
 const TEAM_MAX = 3;
@@ -119,13 +124,13 @@ export default function ArenaParent({ kids }: Props) {
             <button type="button" className={mode === "DUEL" ? "active" : ""} onClick={() => setMode("DUEL")}>⚔️ ดวล 1 รอบ</button>
             <button type="button" className={mode === "TOURNAMENT" ? "active" : ""} onClick={() => setMode("TOURNAMENT")}>🏟️ ทัวร์นาเมนต์</button>
           </div>
-          {mode === "TOURNAMENT" ? (
+          {mode === "TOURNAMENT" && (
             <div className="arena-tournament-note">
               <strong>🏟️ สู้ 3 รอบติด กับทีมที่ระบบเล่น</strong>
               <small>{TOURNAMENT_STAGES.map((stage) => stage.icon + " " + stage.label).join(" → ")}</small>
               <small>ทีมลูกสู้ต่อเนื่อง ฟื้น HP 60% ระหว่างรอบ · ศัตรูเก่งขึ้นทุกรอบ</small>
             </div>
-          ) : (
+          )}
           <div>
             <p className="arena-label">ความยาก</p>
             <div className="segmented arena-difficulty">
@@ -135,9 +140,8 @@ export default function ArenaParent({ kids }: Props) {
                 </button>
               ))}
             </div>
-            <small className="muted">{DIFFICULTY_HINT[difficulty]}</small>
+            <small className="muted">{(mode === "TOURNAMENT" ? TOURNAMENT_HINT : DIFFICULTY_HINT)[difficulty]}</small>
           </div>
-          )}
           {mode === "DUEL" && (
             <div>
               <p className="arena-label">ทีมของฉัน</p>
@@ -230,7 +234,7 @@ export default function ArenaParent({ kids }: Props) {
       <section className="panel arena-lobby">
         <div className="section-heading">
           <h2>{view.room.mode === "TOURNAMENT" ? "🏟️ ทัวร์นาเมนต์" : "⚔️ ห้อง Arena"}</h2>
-          <span>{view.room.mode === "TOURNAMENT" ? "แชมป์ได้" : DIFFICULTY_LABEL[view.room.difficulty] + " · ชนะได้"} ⭐ {view.room.prize}</span>
+          <span>{DIFFICULTY_LABEL[view.room.difficulty]} · {view.room.mode === "TOURNAMENT" ? "แชมป์ได้" : "ชนะได้"} ⭐ {view.room.prize}</span>
         </div>
         {view.room.theme && <p className="arena-status">{THEMES[view.room.theme].icon} {THEMES[view.room.theme].label}</p>}
         <p className="muted">ให้ลูกกด "⚔️ Arena" แล้วใส่รหัสนี้</p>

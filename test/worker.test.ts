@@ -811,7 +811,7 @@ describe("arena progression", () => {
     quests: { code: string; points: number }[];
   };
   type View = {
-    room: { code: string; status: string; version: number; winner: string | null; reward_points: number; mode: string; stage: number; auto_parent: boolean };
+    room: { code: string; status: string; version: number; winner: string | null; reward_points: number; mode: string; stage: number; auto_parent: boolean; difficulty: string };
     stage_teams: { id: string }[][] | null;
     state: {
       winner: string | null; round: number;
@@ -916,7 +916,7 @@ describe("arena progression", () => {
   it("runs a three-round tournament and crowns a champion", async () => {
     const { parent, kid, code, view, stageTeams } = await start({ mode: "TOURNAMENT", autoParent: false, prize: 120 });
     expect(stageTeams).toHaveLength(3);
-    expect(view.room).toMatchObject({ mode: "TOURNAMENT", stage: 1, auto_parent: true, status: "BATTLE" });
+    expect(view.room).toMatchObject({ mode: "TOURNAMENT", stage: 1, auto_parent: true, status: "BATTLE", difficulty: "EASY" });
 
     // Can't skip ahead before winning the round.
     expect((await post(`/api/arena/rooms/${code}/next`, kid, {})).status).toBe(409);
@@ -931,7 +931,7 @@ describe("arena progression", () => {
       const next = await post(`/api/arena/rooms/${code}/next`, kid, {});
       expect(next.status).toBe(200);
       const moved = await next.json() as View;
-      expect(moved.room.stage).toBe(stage + 1);
+      expect(moved.room).toMatchObject({ stage: stage + 1, difficulty: "EASY" });
       expect(moved.state).toMatchObject({ winner: null, round: 1 });
       // Double tap doesn't skip a round.
       expect((await post(`/api/arena/rooms/${code}/next`, kid, {})).status).toBe(409);
@@ -940,7 +940,8 @@ describe("arena progression", () => {
     await rigWin(code);
     const champion = await attack(kid, code);
     expect(champion.room).toMatchObject({ status: "FINISHED", winner: "CHILD", stage: 3, reward_points: 120 });
-    expect(champion.results?.rp.delta).toBe(75);
+    // EASY tournament: 10 per round + 20 for the title.
+    expect(champion.results?.rp.delta).toBe(50);
     expect(champion.results?.achievements.map((entry) => entry.code)).toEqual(expect.arrayContaining(["FIRST_WIN", "CHAMPION"]));
     const ledger = await env.DB.prepare("SELECT reason FROM point_transactions WHERE reference_type = 'ARENA'").all<{ reason: string }>();
     expect(ledger.results).toEqual([{ reason: "👑 แชมป์ทัวร์นาเมนต์ Arena" }]);
@@ -953,6 +954,14 @@ describe("arena progression", () => {
     expect(history.summary).toMatchObject({ tournaments: 1, championships: 1 });
     expect(history.by_difficulty.HARD.wins).toBe(0);
     expect(history.recent[0]).toMatchObject({ mode: "TOURNAMENT", stage: 3 });
+  });
+
+  it("uses the tournament's difficulty for every round's opponents", async () => {
+    const { view } = await start({ mode: "TOURNAMENT", difficulty: "HARD" });
+    expect(view.room.difficulty).toBe("HARD");
+    // HARD round 1 plays one level above the child's team (Lv.1) at ×0.8.
+    const foe = (view.state as unknown as { teams: { PARENT: { fighters: { level: number }[] } } }).teams.PARENT.fighters[0];
+    expect(foe.level).toBe(2);
   });
 
   it("pays tournament consolation by the round reached", async () => {
@@ -973,7 +982,7 @@ describe("arena progression", () => {
     const current = await (await get(`/api/arena/rooms/${code}`, kid)).json() as View;
     const lost = await (await post(`/api/arena/rooms/${code}/action`, kid, { version: current.room.version, action: "GUARD" })).json() as View;
     expect(lost.room).toMatchObject({ status: "FINISHED", winner: "PARENT", stage: 2, reward_points: 20 });
-    expect(lost.results?.rp.delta).toBe(7);
+    expect(lost.results?.rp.delta).toBe(2);
   });
 });
 

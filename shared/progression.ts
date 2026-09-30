@@ -15,8 +15,12 @@ export const RANKS: { key: RankKey; icon: string; label: string; min: number; bo
 ];
 export const RP_WIN: Record<Difficulty, number> = { EASY: 15, NORMAL: 25, HARD: 35 };
 export const RP_LOSS = 8;
-export const RP_PER_STAGE = 15;
-export const RP_CHAMPION = 30;
+// Tournament rank points by the tournament's difficulty: per round cleared, plus the title.
+export const TOURNAMENT_RP: Record<Difficulty, { stage: number; champion: number }> = {
+  EASY: { stage: 10, champion: 20 },
+  NORMAL: { stage: 15, champion: 30 },
+  HARD: { stage: 20, champion: 45 },
+};
 
 export function rankFor(rp: number) {
   const index = RANKS.reduce((found, rank, i) => (rp >= rank.min ? i : found), 0);
@@ -30,18 +34,32 @@ export function applyRp(rp: number, delta: number) {
 }
 
 export function rpDelta(result: { mode: "DUEL" | "TOURNAMENT"; difficulty: Difficulty; won: boolean; stagesCleared: number }) {
-  if (result.mode === "TOURNAMENT") return RP_PER_STAGE * result.stagesCleared + (result.won ? RP_CHAMPION : -RP_LOSS);
+  if (result.mode === "TOURNAMENT") {
+    const rp = TOURNAMENT_RP[result.difficulty];
+    return rp.stage * result.stagesCleared + (result.won ? rp.champion : -RP_LOSS);
+  }
   return result.won ? RP_WIN[result.difficulty] : -RP_LOSS;
 }
 
-// Tournament rounds, each against a fresh AI team that gets tougher. `difficulty`
-// picks the rarities; `scale` is lower than a duel because HP carries over.
-// Simulated: a starter team wins it ~20% of the time, a leveled team ~40%.
-export const TOURNAMENT_STAGES: { label: string; icon: string; difficulty: Difficulty; scale: number; levelBonus: number }[] = [
-  { label: "รอบคัดเลือก", icon: "🥊", difficulty: "EASY", scale: 0.75, levelBonus: 0 },
-  { label: "รอบรองชนะเลิศ", icon: "⚔️", difficulty: "NORMAL", scale: 0.8, levelBonus: 1 },
-  { label: "รอบชิงชนะเลิศ", icon: "👑", difficulty: "HARD", scale: 0.9, levelBonus: 2 },
+// Tournament rounds, each against a fresh AI team that gets tougher.
+export const TOURNAMENT_STAGES: { label: string; icon: string }[] = [
+  { label: "รอบคัดเลือก", icon: "🥊" },
+  { label: "รอบรองชนะเลิศ", icon: "⚔️" },
+  { label: "รอบชิงชนะเลิศ", icon: "👑" },
 ];
+
+// Opponents per round for each tournament difficulty: `pool` picks the rarities (as in
+// a duel of that difficulty), `scale` the stats (lower than a duel because HP carries
+// over), `levelBonus` levels above the child team's average.
+// Simulated champion rate (AI vs AI, 2,000 runs) for a Lv.1 COMMON/RARE team /
+// a Lv.3 team with EPICs / a Lv.5 team with anything:
+//   EASY 48% / 65% / 70% · NORMAL 22% / 41% / 46% · HARD 7% / 18% / 24%
+type TournamentRound = { pool: Difficulty; scale: number; levelBonus: number };
+export const TOURNAMENT_LEVELS: Record<Difficulty, TournamentRound[]> = {
+  EASY: [{ pool: "EASY", scale: 0.75, levelBonus: 0 }, { pool: "EASY", scale: 0.8, levelBonus: 0 }, { pool: "NORMAL", scale: 0.85, levelBonus: 1 }],
+  NORMAL: [{ pool: "EASY", scale: 0.75, levelBonus: 0 }, { pool: "NORMAL", scale: 0.8, levelBonus: 1 }, { pool: "HARD", scale: 0.9, levelBonus: 2 }],
+  HARD: [{ pool: "NORMAL", scale: 0.8, levelBonus: 1 }, { pool: "HARD", scale: 0.9, levelBonus: 1 }, { pool: "HARD", scale: 0.95, levelBonus: 2 }],
+};
 
 // What a finished room tells the achievement check.
 export type Career = {
@@ -68,7 +86,7 @@ export const ACHIEVEMENTS = {
   WINS_50: { icon: "🏆", label: "ตำนาน Arena", detail: "ชนะครบ 50 ห้อง", points: 150, test: (_, c) => c.wins >= 50 },
   STREAK_3: { icon: "🔥", label: "ร้อนแรง", detail: "ชนะติดกัน 3 ห้อง", points: 30, test: (_, c) => c.streak >= 3 },
   STREAK_7: { icon: "☄️", label: "หยุดไม่อยู่", detail: "ชนะติดกัน 7 ห้อง", points: 80, test: (_, c) => c.streak >= 7 },
-  HARD_WIN: { icon: "😤", label: "ไม่กลัวยาก", detail: "ชนะห้องระดับยาก", points: 40, test: (g) => g.won && g.mode === "DUEL" && g.difficulty === "HARD" },
+  HARD_WIN: { icon: "😤", label: "ไม่กลัวยาก", detail: "ชนะห้องระดับยาก หรือเป็นแชมป์ทัวร์นาเมนต์ระดับยาก", points: 40, test: (g) => g.won && g.difficulty === "HARD" },
   FLAWLESS: { icon: "✨", label: "ไร้รอยขีดข่วน", detail: "ชนะด้วยทีม 3 ตัวโดยไม่เสียสักตัว", points: 40, test: (g) => g.won && g.teamSize === 3 && g.alive === 3 },
   COMEBACK: { icon: "🦸", label: "พลิกเกม", detail: "ชนะด้วยตัวสุดท้ายที่ HP เหลือไม่ถึง 25%", points: 40, test: (g) => g.won && g.teamSize > 1 && g.alive === 1 && g.lastHpShare < 0.25 },
   ULT_FINISH: { icon: "💥", label: "ปิดจ็อบ", detail: "ปิดเกมด้วยท่าไม้ตาย", points: 30, test: (g) => g.won && g.finisher === "ULTIMATE" },

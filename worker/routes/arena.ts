@@ -10,7 +10,7 @@ import {
 } from "../../shared/arena";
 import { addXp, LEVEL_MAX } from "../../shared/battle";
 import {
-  ACHIEVEMENT_CODES, ACHIEVEMENTS, ARENA_QUESTS, applyRp, dailyQuests, questProgress, rankFor, RANKS, rpDelta, TOURNAMENT_STAGES, unlockedBy,
+  ACHIEVEMENT_CODES, ACHIEVEMENTS, ARENA_QUESTS, applyRp, dailyQuests, questProgress, rankFor, RANKS, rpDelta, TOURNAMENT_LEVELS, TOURNAMENT_STAGES, unlockedBy,
   type AchievementCode, type ArenaQuestCode, type Game,
 } from "../../shared/progression";
 
@@ -472,7 +472,8 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
       return error(400, "INVALID_TEAM", tournament ? "ทัวร์นาเมนต์สุ่มทีมให้อัตโนมัติ" : "เลือกตัวที่ไม่ซ้ำกัน");
     }
     // A tournament plays every round against the system, getting harder each round.
-    const levels = tournament ? TOURNAMENT_STAGES.map((stage) => stage.difficulty) : [parsed.data.difficulty];
+    // A tournament's difficulty picks every round's opponents; the room keeps the chosen difficulty.
+    const levels = tournament ? TOURNAMENT_LEVELS[parsed.data.difficulty].map((round) => round.pool) : [parsed.data.difficulty];
     const all = await env.DB.prepare(
       "SELECT id, name, image_url, rarity, type_primary, type_secondary FROM characters WHERE is_active = 1",
     ).all<CharacterInfo>();
@@ -510,7 +511,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
         await env.DB.prepare(
           `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team, weather, theme, mode, stage_teams)
            VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?, ?, ?, ?, ?)`,
-        ).bind(id, code, user.id, levels[0], parsed.data.prize, parsed.data.autoParent || tournament ? 1 : 0, JSON.stringify(team), weather, theme,
+        ).bind(id, code, user.id, parsed.data.difficulty, parsed.data.prize, parsed.data.autoParent || tournament ? 1 : 0, JSON.stringify(team), weather, theme,
           tournament ? "TOURNAMENT" : "DUEL", tournament ? JSON.stringify(teams) : null).run();
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -620,14 +621,15 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     if (owned.results.length !== ids.length) return error(400, "INVALID_TEAM", "เลือกได้เฉพาะตัวใน Collection");
     const ordered = ids.map((id) => owned.results.find((row) => row.owned_id === id)!);
 
-    const bonus = room.mode === "TOURNAMENT" ? TOURNAMENT_STAGES[0].levelBonus : 0;
+    const firstRound = room.mode === "TOURNAMENT" ? TOURNAMENT_LEVELS[room.difficulty][0] : null;
+    const bonus = firstRound?.levelBonus ?? 0;
     const parentLevel = Math.min(LEVEL_MAX, parentLevelFor(ordered.map((monster) => monster.level)) + bonus);
     const parentTeam = (JSON.parse(room.parent_team) as CharacterInfo[]).map((monster) => ({ ...monster, level: parentLevel }));
     const childTeam = makeTeam(ordered);
     if (parsed.data.item) childTeam.item = { kind: parsed.data.item, used: false };
     const weather = room.weather && (WEATHER_KINDS as string[]).includes(room.weather) ? room.weather : "CLEAR";
     const theme = room.theme && (THEME_KINDS as string[]).includes(room.theme) ? room.theme : undefined;
-    const scale = room.mode === "TOURNAMENT" ? TOURNAMENT_STAGES[0].scale : DIFFICULTY[room.difficulty].scale;
+    const scale = firstRound?.scale ?? DIFFICULTY[room.difficulty].scale;
     const state = startBattle(childTeam, makeTeam(parentTeam, scale), weather, theme);
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
@@ -676,7 +678,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     if (room.status !== "BATTLE" || !previous || !roundWon(room, previous) || !room.stage_teams) {
       return error(409, "NO_NEXT_ROUND", "ยังไปรอบต่อไปไม่ได้");
     }
-    const stage = TOURNAMENT_STAGES[room.stage];
+    const stage = TOURNAMENT_LEVELS[room.difficulty][room.stage];
     const opponents = (JSON.parse(room.stage_teams) as CharacterInfo[][])[room.stage];
     const childLevels = previous.teams.CHILD.fighters.map((fighter) => fighter.level ?? 1);
     const level = Math.min(LEVEL_MAX, parentLevelFor(childLevels) + stage.levelBonus);
@@ -684,10 +686,10 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     const weather = theme === "SPACE" ? "CLEAR" : rollWeather(rng, undefined, THEMES[theme].weather);
     const state = startNextStage(previous, makeTeam(opponents.map((monster) => ({ ...monster, level })), stage.scale), weather, theme);
     const result = await env.DB.prepare(
-      `UPDATE arena_rooms SET stage = stage + 1, difficulty = ?, parent_team = ?, theme = ?, weather = ?, state = ?,
+      `UPDATE arena_rooms SET stage = stage + 1, parent_team = ?, theme = ?, weather = ?, state = ?,
          version = version + 1, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND version = ?`,
-    ).bind(stage.difficulty, JSON.stringify(opponents), theme, weather, JSON.stringify(state), room.id, room.version).run();
+    ).bind(JSON.stringify(opponents), theme, weather, JSON.stringify(state), room.id, room.version).run();
     if (!result.meta.changes) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
   }
