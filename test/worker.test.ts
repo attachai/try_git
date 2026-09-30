@@ -1088,3 +1088,45 @@ describe("arena family isolation", () => {
     expect((await post(`/api/arena/rooms/${room!.code}/join`, otherKid, {})).status).toBe(200);
   });
 });
+
+describe("arena parent-picked team", () => {
+  type View = { room: { code: string }; parent_team: { id: string }[]; stage_teams: unknown };
+  const get = (path: string, cookie: string) => SELF.fetch("https://example.test" + path, { headers: { cookie } });
+
+  beforeEach(async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO characters (id, name, slug, type_primary, image_url, price, rarity) VALUES ('rock', 'Rock', 'rock', 'Rock', 'https://example.test/rock.png', 400, 'COMMON')"),
+      env.DB.prepare("INSERT INTO characters (id, name, slug, type_primary, image_url, price, rarity) VALUES ('legend', 'Legend', 'legend', 'Dragon', 'https://example.test/legend.png', 3000, 'LEGENDARY')"),
+    ]);
+  });
+
+  it("uses the parent's picks in order, within the difficulty's rarities", async () => {
+    const parent = await sessionCookie("parent");
+    const created = await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: false, parentTeam: ["rock", "starter"] });
+    expect(created.status).toBe(201);
+    const view = await created.json() as View;
+    expect(view.parent_team.map((monster) => monster.id)).toEqual(["rock", "starter"]);
+    await post(`/api/arena/rooms/${view.room.code}/cancel`, parent, {});
+
+    // LEGENDARY is only allowed on HARD.
+    expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: false, parentTeam: ["legend"] })).status).toBe(400);
+    const hard = await post("/api/arena/rooms", parent, { difficulty: "HARD", prize: 0, autoParent: false, parentTeam: ["legend"] });
+    expect(hard.status).toBe(201);
+    await post(`/api/arena/rooms/${(await hard.json() as View).room.code}/cancel`, parent, {});
+
+    for (const parentTeam of [["rock", "rock"], ["nope"], [], ["rock", "starter", "evolved", "legend"]]) {
+      expect((await post("/api/arena/rooms", parent, { difficulty: "HARD", prize: 0, autoParent: false, parentTeam })).status, parentTeam.join()).toBe(400);
+    }
+    expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: true, mode: "TOURNAMENT", parentTeam: ["rock"] })).status).toBe(400);
+  });
+
+  it("lists the monsters a parent may pick per difficulty", async () => {
+    const parent = await sessionCookie("parent");
+    const easy = await (await get("/api/arena/characters?difficulty=EASY", parent)).json() as { characters: { id: string }[] };
+    expect(easy.characters.map((monster) => monster.id).sort()).toEqual(["evolved", "rock", "starter"]);
+    const hard = await (await get("/api/arena/characters?difficulty=HARD", parent)).json() as { characters: { id: string }[] };
+    expect(hard.characters.map((monster) => monster.id)).toContain("legend");
+    expect((await get("/api/arena/characters?difficulty=MEGA", parent)).status).toBe(400);
+    expect((await get("/api/arena/characters?difficulty=EASY", await sessionCookie("child-user"))).status).toBe(403);
+  });
+});

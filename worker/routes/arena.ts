@@ -38,6 +38,8 @@ const createSchema = z.object({
   prize: z.number().int().min(0).max(200),
   autoParent: z.boolean(),
   mode: z.enum(["DUEL", "TOURNAMENT"]).optional(),
+  // A duel team the parent picked, in fighting order; omitted means a random team.
+  parentTeam: z.array(z.string().min(1)).min(1).max(PARENT_TEAM_SIZE).optional(),
 });
 const teamSchema = z.object({
   childCharacterIds: z.array(z.string().min(1)).min(1).max(3),
@@ -465,14 +467,26 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     const parsed = createSchema.safeParse(await readJson<unknown>(request));
     if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid room settings.");
     const tournament = parsed.data.mode === "TOURNAMENT";
+    const picks = parsed.data.parentTeam;
+    if (picks && (tournament || new Set(picks).size !== picks.length)) {
+      return error(400, "INVALID_TEAM", tournament ? "ทัวร์นาเมนต์สุ่มทีมให้อัตโนมัติ" : "เลือกตัวที่ไม่ซ้ำกัน");
+    }
     // A tournament plays every round against the system, getting harder each round.
     const levels = tournament ? TOURNAMENT_STAGES.map((stage) => stage.difficulty) : [parsed.data.difficulty];
     const all = await env.DB.prepare(
       "SELECT id, name, image_url, rarity, type_primary, type_secondary FROM characters WHERE is_active = 1",
     ).all<CharacterInfo>();
     const used = new Set<string>();
-    const teams = levels.map((level) => {
-      const allowed = all.results.filter((monster) => (DIFFICULTY[level].rarities as readonly string[]).includes(monster.rarity));
+    const allowedFor = (level: keyof typeof DIFFICULTY) =>
+      all.results.filter((monster) => (DIFFICULTY[level].rarities as readonly string[]).includes(monster.rarity));
+    if (picks) {
+      const allowed = allowedFor(levels[0]);
+      const chosen = picks.map((id) => allowed.find((monster) => monster.id === id));
+      if (chosen.some((monster) => !monster)) return error(400, "INVALID_TEAM", "มีตัวที่เลือกไม่ได้ในระดับความยากนี้");
+      picks.forEach((id) => used.add(id));
+    }
+    const teams = picks ? [picks.map((id) => all.results.find((monster) => monster.id === id)!)] : levels.map((level) => {
+      const allowed = allowedFor(level);
       // Prefer monsters not already met in an earlier round, if there are enough.
       const fresh = allowed.filter((monster) => !used.has(monster.id));
       const pool = fresh.length >= PARENT_TEAM_SIZE ? fresh : allowed;
@@ -507,6 +521,20 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
       return json(await view(env, room!, "PARENT"), { status: 201 });
     }
     return error(503, "NO_CODE", "ลองสร้างห้องใหม่อีกครั้ง");
+  }
+
+  // Every monster a parent may put in a duel team at this difficulty.
+  if (pathname === "/api/arena/characters" && request.method === "GET") {
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+    const level = new URL(request.url).searchParams.get("difficulty") ?? "NORMAL";
+    if (!(level in DIFFICULTY)) return error(400, "INVALID_REQUEST", "Unknown difficulty.");
+    const rarities = DIFFICULTY[level as keyof typeof DIFFICULTY].rarities;
+    const result = await env.DB.prepare(
+      `SELECT id, name, image_url, rarity, type_primary, type_secondary FROM characters
+       WHERE is_active = 1 AND rarity IN (${rarities.map(() => "?").join(",")})
+       ORDER BY CAST(external_id AS INTEGER) ASC, name ASC`,
+    ).bind(...rarities).all<CharacterInfo>();
+    return json({ characters: result.results });
   }
 
   if ((pathname === "/api/arena/history" || pathname === "/api/arena/profile") && request.method === "GET") {

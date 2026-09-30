@@ -1,4 +1,6 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { computeStats } from "../../../shared/battle";
+import { TYPE_INFO } from "../../../shared/types";
 import { api } from "../../lib/api";
 import { TypeBadges } from "../TypeBadge";
 import { THEME_KINDS, THEMES, type ThemeKind } from "../../../shared/arena";
@@ -6,7 +8,7 @@ import { TOURNAMENT_STAGES } from "../../../shared/progression";
 import ArenaHistory from "./ArenaHistory";
 import ArenaProfile from "./ArenaProfile";
 import BattleView from "./BattleView";
-import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
+import { DIFFICULTY_LABEL, useRoom, type ArenaCharacter, type RoomView } from "./useRoom";
 
 type Difficulty = keyof typeof DIFFICULTY_LABEL;
 const DIFFICULTY_HINT: Record<Difficulty, string> = {
@@ -16,6 +18,8 @@ const DIFFICULTY_HINT: Record<Difficulty, string> = {
 };
 
 type Props = { kids: { id: string; display_name: string }[] };
+const TEAM_MAX = 3;
+const RARITY_ORDER = ["COMMON", "RARE", "EPIC", "LEGENDARY"];
 
 export default function ArenaParent({ kids }: Props) {
   const { view, setView } = useRoom(null);
@@ -25,6 +29,37 @@ export default function ArenaParent({ kids }: Props) {
   const [autoParent, setAutoParent] = useState(false);
   const [theme, setTheme] = useState<ThemeKind | "RANDOM">("RANDOM");
   const [mode, setMode] = useState<"DUEL" | "TOURNAMENT">("DUEL");
+  const [teamMode, setTeamMode] = useState<"AUTO" | "PICK">("AUTO");
+  const [catalog, setCatalog] = useState<ArenaCharacter[]>([]);
+  const [picks, setPicks] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const picking = mode === "DUEL" && teamMode === "PICK";
+
+  // The allowed monsters depend on the difficulty; drop picks that no longer fit.
+  useEffect(() => {
+    if (!picking) return;
+    api<{ characters: ArenaCharacter[] }>("/api/arena/characters?difficulty=" + difficulty)
+      .then((data) => {
+        setCatalog(data.characters);
+        setPicks((current) => current.filter((id) => data.characters.some((monster) => monster.id === id)));
+      })
+      .catch(() => undefined);
+  }, [picking, difficulty]);
+
+  const shown = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return catalog
+      .filter((monster) => (!term || monster.name.toLowerCase().includes(term)) && (!typeFilter || monster.type_primary === typeFilter || monster.type_secondary === typeFilter))
+      .sort((a, b) => RARITY_ORDER.indexOf(b.rarity) - RARITY_ORDER.indexOf(a.rarity));
+  }, [catalog, search, typeFilter]);
+  const types = useMemo(() => [...new Set(catalog.map((monster) => monster.type_primary))].sort(), [catalog]);
+
+  function togglePick(id: string) {
+    setPicks((current) => current.includes(id)
+      ? current.filter((item) => item !== id)
+      : current.length < TEAM_MAX ? [...current, id] : current);
+  }
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [historyChildId, setHistoryChildId] = useState("");
@@ -42,7 +77,7 @@ export default function ArenaParent({ kids }: Props) {
     try {
       setBusy(true);
       setMessage("");
-      setView(await api<RoomView>("/api/arena/rooms", { method: "POST", body: JSON.stringify({ difficulty, prize, autoParent, theme, mode }) }));
+      setView(await api<RoomView>("/api/arena/rooms", { method: "POST", body: JSON.stringify({ difficulty, prize, autoParent, theme, mode, ...(picking ? { parentTeam: picks } : {}) }) }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "สร้างห้องไม่สำเร็จ");
     } finally {
@@ -103,6 +138,58 @@ export default function ArenaParent({ kids }: Props) {
             <small className="muted">{DIFFICULTY_HINT[difficulty]}</small>
           </div>
           )}
+          {mode === "DUEL" && (
+            <div>
+              <p className="arena-label">ทีมของฉัน</p>
+              <div className="segmented">
+                <button type="button" className={teamMode === "AUTO" ? "active" : ""} onClick={() => setTeamMode("AUTO")}>🎲 สุ่มให้</button>
+                <button type="button" className={teamMode === "PICK" ? "active" : ""} onClick={() => setTeamMode("PICK")}>✋ เลือกเอง</button>
+              </div>
+              {picking && (
+                <div className="arena-parent-pick">
+                  <small className="muted">แตะเรียงลำดับ 1-2-3 · เลือกได้ 1-3 ตัวที่ใช้ได้ในระดับ{DIFFICULTY_LABEL[difficulty]} · ลูกจะเห็นทีมนี้ก่อนเลือกทีม</small>
+                  {picks.length > 0 && (
+                    <div className="arena-parent-picked">
+                      {picks.map((id, index) => {
+                        const monster = catalog.find((entry) => entry.id === id);
+                        return monster ? (
+                          <button type="button" key={id} onClick={() => togglePick(id)} aria-label={"เอา " + monster.name + " ออก"}>
+                            <span className="arena-pick-order">{index + 1}</span>
+                            <img src={monster.image_url} alt="" />
+                            <small>{monster.name} ✕</small>
+                          </button>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+                  <div className="arena-parent-filters">
+                    <input className="reason-input" placeholder="ค้นหาชื่อ" value={search} onChange={(e) => setSearch(e.target.value)} />
+                    <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                      <option value="">ทุกธาตุ</option>
+                      {types.map((type) => <option key={type} value={type}>{TYPE_INFO[type]?.icon} {TYPE_INFO[type]?.th ?? type}</option>)}
+                    </select>
+                  </div>
+                  <div className="arena-pick-grid compact">
+                    {shown.map((monster) => {
+                      const order = picks.indexOf(monster.id);
+                      const stats = computeStats(monster);
+                      return (
+                        <button type="button" key={monster.id} className={"arena-pick" + (order >= 0 ? " picked" : "")} onClick={() => togglePick(monster.id)}>
+                          {order >= 0 && <span className="arena-pick-order">{order + 1}</span>}
+                          <img src={monster.image_url} alt="" loading="lazy" />
+                          <strong>{monster.name}</strong>
+                          <span className={"rarity rarity-" + monster.rarity.toLowerCase()}>{monster.rarity}</span>
+                          <TypeBadges primary={monster.type_primary} secondary={monster.type_secondary} iconOnly />
+                          <small>❤️{stats.hp} ⚔️{stats.atk} 🛡️{stats.def}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {shown.length === 0 && <p className="muted">ไม่พบตัวละคร</p>}
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <p className="arena-label">{mode === "TOURNAMENT" ? "สนามรอบแรก (รอบต่อไปสุ่มสนามใหม่)" : "สนาม"}</p>
             <div className="arena-themes">
@@ -127,7 +214,9 @@ export default function ArenaParent({ kids }: Props) {
               ให้ระบบเล่นแทนฉัน
             </label>
           )}
-          <button disabled={busy} className="submit-button earn" type="submit">{busy ? "กำลังสร้าง..." : "สร้างห้อง"}</button>
+          <button disabled={busy || (picking && picks.length === 0)} className="submit-button earn" type="submit">
+            {busy ? "กำลังสร้าง..." : picking && picks.length === 0 ? "เลือกทีมอย่างน้อย 1 ตัว" : "สร้างห้อง"}
+          </button>
           {message && <p className="feedback">{message}</p>}
         </form>
       </section>

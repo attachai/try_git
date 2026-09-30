@@ -140,7 +140,7 @@ Simulation per theme (1,000 AI battles each): median 15–16 turns everywhere, a
 
 ## Rooms
 
-1. A parent creates a room (`POST /api/arena/rooms`) with a difficulty, a prize (0–200) and optionally "let the system play". The server rolls a random 3-monster parent team and a 4-digit code.
+1. A parent creates a room (`POST /api/arena/rooms`) with a difficulty, a prize (0–200) and optionally "let the system play". The server rolls a random 3-monster parent team and a 4-digit code. In a duel the parent can instead pick 1–3 monsters in fighting order (`parentTeam: [characterId, ...]`), from any active character the difficulty allows (`GET /api/arena/characters?difficulty=`). Tournaments always roll their teams.
    - EASY: COMMON/RARE, stats ×0.85
    - NORMAL: no LEGENDARY, ×1.0
    - HARD: anything, ×1.1
