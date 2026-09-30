@@ -20,6 +20,7 @@ export type RoomView = {
   parent_team: ArenaCharacter[];
   state: BattleState | null;
   mvp: { name: string; damage: number } | null;
+  xp_awards: { name: string; gained: number; level: number; levels_gained: number }[] | null;
 };
 
 export const POLL_MS = 1500;

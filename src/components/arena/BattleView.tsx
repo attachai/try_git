@@ -29,7 +29,7 @@ function FighterCard({ team, side, isTurn, mine }: { team: Team; side: Side; isT
       <img src={fighter.image_url} alt={fighter.name} />
       <div className="arena-fighter-info">
         <div className="arena-fighter-top">
-          <strong>{fighter.name}</strong>
+          <strong>{fighter.name}{fighter.level ? <span className="level-chip">Lv.{fighter.level}</span> : null}</strong>
           <TypeBadges primary={fighter.type_primary} secondary={fighter.type_secondary} iconOnly />
           <span className="arena-owner">{SIDE_LABEL[side]}</span>
         </div>
@@ -112,6 +112,17 @@ export default function BattleView({ view, onView }: Props) {
         <div className={"arena-result" + (won ? " win" : "")}>
           <strong>{won ? "🏆 ชนะแล้ว!" : me === "CHILD" ? "💪 เกือบแล้ว! ลองใหม่นะ" : "🏆 ผู้ปกครองชนะ"}</strong>
           {view.mvp && <span>🏅 MVP: {view.mvp.name} ({view.mvp.damage} ดาเมจ)</span>}
+          {me === "CHILD" && view.xp_awards && view.xp_awards.length > 0 && (
+            <ul className="xp-awards">
+              {view.xp_awards.map((award) => (
+                <li key={award.name}>
+                  {award.name} +{award.gained} XP
+                  {award.levels_gained > 0 && <strong> · เลเวลอัป! Lv.{award.level} 🎉</strong>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {me === "CHILD" && view.xp_awards?.length === 0 && <span className="muted">วันนี้รับ XP ครบ 5 ห้องแล้ว</span>}
           {me === "CHILD" && (
             <span>{view.room.reward_points > 0 ? "ได้ ⭐ +" + view.room.reward_points + " คะแนน" : "วันนี้รับรางวัล Arena ครบแล้ว"}</span>
           )}

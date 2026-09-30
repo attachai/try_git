@@ -347,3 +347,11 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .arena-result.win { background: linear-gradient(135deg, #fef3c7, #fde68a); }
 .arena-result strong { font-size: 22px; }
 @media (max-width: 420px) { .arena-actions { grid-template-columns: 1fr 1fr; } .arena-actions button.special { grid-column: 1 / -1; order: -1; } }
+.level-chip { display: inline-block; margin-left: 5px; padding: 2px 6px; border-radius: 999px; background: #1e1b4b; color: #fde68a; font-size: 10px; font-weight: 900; vertical-align: middle; letter-spacing: .02em; }
+.level-bar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin-bottom: 8px; }
+.level-bar .level-chip { margin-left: 0; font-size: 11px; }
+.level-track { height: 6px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+.level-track span { display: block; height: 100%; background: linear-gradient(90deg, #a78bfa, #6366f1); }
+.level-bar small { font-size: 11px; color: #64748b; font-weight: 700; font-variant-numeric: tabular-nums; }
+.xp-awards { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.xp-awards strong { color: #7c3aed; }
