@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyTally } from "../shared/arena";
 import {
-  ACHIEVEMENT_CODES, applyRp, ARENA_QUEST_CODES, DAILY_ARENA_QUESTS, dailyQuests, questProgress, rankFor, RANKS, rpDelta, unlockedBy,
+  ACHIEVEMENT_CODES, TOURNAMENT_LEVELS, TOURNAMENT_STAGES, applyRp, ARENA_QUEST_CODES, DAILY_ARENA_QUESTS, dailyQuests, questProgress, rankFor, RANKS, rpDelta, unlockedBy,
   type Career, type Game,
 } from "../shared/progression";
 
@@ -30,7 +30,9 @@ describe("arena rank", () => {
     expect(rpDelta({ mode: "DUEL", difficulty: "EASY", won: true, stagesCleared: 0 })).toBe(15);
     expect(rpDelta({ mode: "DUEL", difficulty: "HARD", won: true, stagesCleared: 0 })).toBe(35);
     expect(rpDelta({ mode: "DUEL", difficulty: "HARD", won: false, stagesCleared: 0 })).toBe(-8);
-    expect(rpDelta({ mode: "TOURNAMENT", difficulty: "HARD", won: true, stagesCleared: 3 })).toBe(75);
+    expect(rpDelta({ mode: "TOURNAMENT", difficulty: "EASY", won: true, stagesCleared: 3 })).toBe(50);
+    expect(rpDelta({ mode: "TOURNAMENT", difficulty: "NORMAL", won: true, stagesCleared: 3 })).toBe(75);
+    expect(rpDelta({ mode: "TOURNAMENT", difficulty: "HARD", won: true, stagesCleared: 3 })).toBe(105);
     expect(rpDelta({ mode: "TOURNAMENT", difficulty: "NORMAL", won: false, stagesCleared: 1 })).toBe(7);
   });
 });
@@ -44,7 +46,8 @@ describe("arena achievements", () => {
     expect(unlockedBy(game({ alive: 1, lastHpShare: 0.2 }), career())).toContain("COMEBACK");
     expect(unlockedBy(game({ teamSize: 1, alive: 1, lastHpShare: 0.2 }), career())).not.toContain("COMEBACK");
     expect(unlockedBy(game({ mode: "TOURNAMENT", difficulty: "HARD" }), career())).toEqual(expect.arrayContaining(["CHAMPION"]));
-    expect(unlockedBy(game({ mode: "TOURNAMENT", difficulty: "HARD" }), career())).not.toContain("HARD_WIN");
+    expect(unlockedBy(game({ mode: "TOURNAMENT", difficulty: "NORMAL" }), career())).not.toContain("HARD_WIN");
+    expect(unlockedBy(game({ mode: "TOURNAMENT", difficulty: "HARD" }), career())).toContain("HARD_WIN");
     const themes = ["VOLCANO", "BEACH", "FOREST", "SNOWPEAK", "SPACE", "STADIUM"];
     expect(unlockedBy(game(), career({ themesWon: [...themes, "BEACH"], maxLevel: 10 }))).toEqual(expect.arrayContaining(["ALL_THEMES", "MAX_LEVEL"]));
     expect(unlockedBy(game(), career({ themesWon: themes.slice(1) }))).not.toContain("ALL_THEMES");
@@ -71,5 +74,18 @@ describe("arena daily quests", () => {
     expect(questProgress("CRIT_3", [game({ tally })])).toBe(2);
     expect(questProgress("WIN_NORMAL", [game({ difficulty: "EASY" })])).toBe(0);
     expect(questProgress("WIN_NORMAL", [game({ difficulty: "EASY", mode: "TOURNAMENT" })])).toBe(1);
+  });
+});
+
+describe("tournament difficulty", () => {
+  it("has a round config per stage that gets tougher, and tougher levels overall", () => {
+    const strength = (round: { scale: number; levelBonus: number }) => round.scale + round.levelBonus * 0.03;
+    for (const rounds of Object.values(TOURNAMENT_LEVELS)) {
+      expect(rounds).toHaveLength(TOURNAMENT_STAGES.length);
+      rounds.slice(1).forEach((round, i) => expect(strength(round)).toBeGreaterThan(strength(rounds[i])));
+    }
+    const total = (level: keyof typeof TOURNAMENT_LEVELS) => TOURNAMENT_LEVELS[level].reduce((sum, round) => sum + strength(round), 0);
+    expect(total("EASY")).toBeLessThan(total("NORMAL"));
+    expect(total("NORMAL")).toBeLessThan(total("HARD"));
   });
 });

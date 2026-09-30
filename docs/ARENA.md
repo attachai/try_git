@@ -164,20 +164,22 @@ Children see it under the code entry on the Arena screen. Parents see it in the 
 
 ## Tournament
 
-A parent can create a room with `mode: "TOURNAMENT"`: three rounds in a row against the system (it always plays the opponents).
+A parent can create a room with `mode: "TOURNAMENT"` and a difficulty: three rounds in a row against the system (it always plays the opponents). The room keeps the chosen difficulty; each round's opponents come from `TOURNAMENT_LEVELS` in `shared/progression.ts`:
 
-| Round | Opponent rarities | Stats | Level |
+| Difficulty | 🥊 รอบคัดเลือก | ⚔️ รอบรองชนะเลิศ | 👑 รอบชิงชนะเลิศ |
 |---|---|---|---|
-| 🥊 รอบคัดเลือก | COMMON/RARE | ×0.75 | child team average |
-| ⚔️ รอบรองชนะเลิศ | no LEGENDARY | ×0.8 | average +1 |
-| 👑 รอบชิงชนะเลิศ | anything | ×0.9 | average +2 |
+| EASY | COMMON/RARE ×0.75, Lv +0 | COMMON/RARE ×0.8, Lv +0 | no LEGENDARY ×0.85, Lv +1 |
+| NORMAL | COMMON/RARE ×0.75, Lv +0 | no LEGENDARY ×0.8, Lv +1 | anything ×0.9, Lv +2 |
+| HARD | no LEGENDARY ×0.8, Lv +1 | anything ×0.9, Lv +1 | anything ×0.95, Lv +2 |
+
+Levels are above the child team's average level.
 
 - The child sees all three opponent teams before picking, and plays the whole tournament with one team.
 - Between rounds every monster heals 60% of max HP (fainted ones come back at 60%) and statuses clear. The ultimate gauge, the carried item, damage dealt, and the tallies carry over.
 - Each round has a new random arena (the parent picks the first one).
 - After a won round the room stays in `BATTLE` with `state.winner = "CHILD"`; the child calls `POST /api/arena/rooms/:code/next` to start the next round. Rewards, XP, and scoring happen once, when the tournament ends.
 - Champion: the prize (0–200). Knocked out: +10 per round reached. XP gets +10 per round cleared.
-- Balance (AI vs AI, 2,000 runs each): a random COMMON/RARE Lv.1 team becomes champion ~21% of the time, a Lv.3 team with EPICs ~42%. Round 1 is a warm-up (~98% win). With the duel stats (×0.85/1.0/1.1) and a 50% heal it was 1–6%.
+- Balance (AI vs AI, 2,000 runs each), champion rate for a Lv.1 COMMON/RARE team / a Lv.3 team with EPICs / a Lv.5 team with anything: EASY 48% / 65% / 70%, NORMAL 22% / 41% / 46%, HARD 7% / 18% / 24%. With the duel stats (×0.85/1.0/1.1) and a 50% heal NORMAL was 1–6%.
 
 ## Rank, achievements, and arena quests
 
@@ -194,7 +196,7 @@ Every finished room is scored once (`arena_rooms.results` is the guard) after re
 | 👑 มาสเตอร์ | 900 | 200 |
 
 - Duel win: EASY +15, NORMAL +25, HARD +35. Loss: −8, but never below the floor of the child's current tier.
-- Tournament: +15 per round cleared, then +30 for the title or −8 for being knocked out.
+- Tournament: per round cleared EASY +10 / NORMAL +15 / HARD +20, then the title EASY +20 / NORMAL +30 / HARD +45, or −8 for being knocked out.
 - Rank points only count on rooms that also earned XP (5 per day), so easy rooms can't be farmed.
 - The bonus is paid once per tier ever (`reference_type = 'ARENA_RANK'`).
 

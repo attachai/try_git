@@ -99,7 +99,7 @@ export default function ArenaHistory({ childId, childName, refreshKey }: Props) 
                   <div className="history-row-top">
                     <strong>{tournament ? (won ? "👑 แชมป์" : "💪 ตก" + (TOURNAMENT_STAGES[game.stage - 1]?.label ?? "")) : won ? "🏆 ชนะ" : "💪 แพ้"}</strong>
                     <span>{tournament ? "ทัวร์นาเมนต์" : "vs " + game.parent_name}</span>
-                    <span className="history-chip">{tournament ? "🏟️ " + game.stage + "/" + TOURNAMENT_STAGES.length : DIFFICULTY_LABEL[game.difficulty]}</span>
+                    <span className="history-chip">{(tournament ? "🏟️ " : "") + DIFFICULTY_LABEL[game.difficulty] + (tournament ? " · " + game.stage + "/" + TOURNAMENT_STAGES.length : "")}</span>
                     <small>{when(game.finished_at)}</small>
                   </div>
                   <div className="history-row-teams">

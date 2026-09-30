@@ -110,7 +110,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
           {back}
           <div className="section-heading">
             <h2>{tournament ? "🏟️ ทัวร์นาเมนต์ 3 รอบ" : "ทีมของ " + view.room.parent_name}</h2>
-            <span>{tournament ? "แชมป์ได้" : DIFFICULTY_LABEL[view.room.difficulty] + " · ชนะได้"} ⭐ {view.room.prize}</span>
+            <span>{DIFFICULTY_LABEL[view.room.difficulty]} · {tournament ? "แชมป์ได้" : "ชนะได้"} ⭐ {view.room.prize}</span>
           </div>
           {tournament && <p className="muted">ทีมเดียวสู้ครบ 3 รอบ ฟื้น HP 60% ระหว่างรอบ หลอดไม้ตายสะสมต่อได้ · ศัตรูเก่งขึ้นทุกรอบ</p>}
           {(view.stage_teams ?? [foes]).map((team, round) => (
