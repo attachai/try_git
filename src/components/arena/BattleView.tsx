@@ -263,7 +263,25 @@ export default function BattleView({ view, onView }: Props) {
         {theme && <small className="arena-theme-rule">📜 {theme.rule}</small>}
       </div>
 
-      <div className={"arena-stage " + fx.screen + (danger ? " danger" : "") + " stage-" + (state.weather ?? "CLEAR").toLowerCase() + (state.theme ? " theme-" + state.theme.toLowerCase() : "")}>
+      <div className={"arena-stage " + fx.screen + (danger ? " danger" : "") + " stage-" + (state.weather ?? "CLEAR").toLowerCase() + (state.theme ? " theme-" + state.theme.toLowerCase() : "") + (state.winner ? " battle-finished" : state.turn === me ? " turn-mine" : " turn-foe")}>
+        <div className="arena-scene" aria-hidden="true">
+          <span className="arena-scene-orb" />
+          <span className="arena-scene-landmark" />
+          <span className="arena-scene-horizon" />
+          <span className="arena-scene-floor" />
+          <span className="arena-platform platform-foe" />
+          <span className="arena-platform platform-mine" />
+          <span className="arena-spotlight spotlight-foe" />
+          <span className="arena-spotlight spotlight-mine" />
+          <span className="arena-ambient">
+            {Array.from({ length: 8 }, (_, i) => <i key={i} />)}
+          </span>
+        </div>
+        <div className="arena-venue-badge" aria-hidden="true">
+          <span>{theme?.icon ?? "⚔️"}</span>
+          <strong>{theme?.label ?? "สนามประลอง"}</strong>
+          <small>ROUND {state.round}</small>
+        </div>
         <div className={"arena-weather weather-" + (state.weather ?? "CLEAR").toLowerCase()} aria-hidden="true">
           {Array.from({ length: 14 }, (_, i) => <span key={i} style={{ left: ((i * 29) % 100) + "%", animationDelay: ((i * 0.37) % 2).toFixed(2) + "s" }} />)}
         </div>
