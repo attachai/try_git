@@ -130,3 +130,42 @@ describe("parent level scaling", () => {
     expect(parentLevelFor([10, 10, 9])).toBe(9);
   });
 });
+
+describe("battle events", () => {
+  it("records each beat with increasing sequence numbers", () => {
+    let state = battle([mon("Charmander", "Fire")], [mon("Bulbasaur", "Grass")]);
+    state = applyAction(state, "CHILD", "ATTACK", script(0.99, 0, 0.5));
+    const [attack, hitEvent] = state.events!;
+    expect(attack).toMatchObject({ seq: 1, kind: "attack", side: "CHILD", index: 0, type: "Fire" });
+    const bulbasaur = activeFighter(state, "PARENT");
+    expect(hitEvent).toMatchObject({ seq: 2, kind: "hit", side: "PARENT", crit: true, multiplier: 1.5, hp: bulbasaur.hp, max: bulbasaur.stats.hp });
+
+    state = applyAction(state, "PARENT", "ATTACK", script(0));
+    expect(state.events!.slice(-2).map((e) => e.kind)).toEqual(["attack", "miss"]);
+    expect(state.eventSeq).toBe(4);
+  });
+
+  it("emits special, status, faint, switch, and win", () => {
+    let state = battle([mon("Charizard", "Fire", "LEGENDARY")], [mon("A", "Grass"), mon("B", "Grass")]);
+    state.teams.CHILD.energy = 3;
+    state.teams.PARENT.fighters[0].hp = 1;
+    state = applyAction(state, "CHILD", "SPECIAL", steady);
+    expect(state.events!.map((e) => e.kind)).toEqual(["special", "hit", "faint", "switch"]);
+    expect(state.events![0]).toMatchObject({ move: "เปลวเพลิง" });
+    expect(state.events![3]).toMatchObject({ side: "PARENT", index: 1 });
+
+    state = applyAction(state, "PARENT", "GUARD", steady);
+    expect(state.events!.at(-1)).toMatchObject({ kind: "guard", side: "PARENT" });
+    state.teams.PARENT.fighters[1].hp = 1;
+    state = applyAction(state, "CHILD", "ATTACK", steady);
+    expect(state.events!.slice(-2).map((e) => e.kind)).toEqual(["faint", "win"]);
+  });
+
+  it("keeps only the latest events", () => {
+    let state = battle([mon("Onix", "Rock")], [mon("Onix2", "Rock")]);
+    for (let i = 0; i < 50; i++) state = applyAction(state, state.turn, "GUARD", steady);
+    expect(state.events!.length).toBe(40);
+    expect(state.eventSeq).toBe(50);
+    expect(state.events![0].seq).toBe(11);
+  });
+});

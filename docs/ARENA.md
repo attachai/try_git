@@ -68,6 +68,24 @@ The parent team plays at the child team's average level, rounded down (`parentLe
 
 Every monster on the child's team gets XP when a room finishes: +30 for a win, +10 for a loss, and +20 more for the winning side's MVP. XP counts for up to 5 rooms per child per Thailand-time day. Going from level L to L+1 takes 50 × L XP (50, 100, …, 450; 2,250 total to reach Lv.10). `arena_rooms.xp_day` is claimed before paying, so a room hands out XP once, and `xp_awards` holds the summary shown on the result screen.
 
+## Effects
+
+Every beat the engine resolves is also recorded as a structured event in `state.events`: `attack`, `special`, `hit`, `miss`, `heal`, `status`, `buff`, `tick`, `guard`, `paralyzed`, `faint`, `switch`, `win`. Each has an increasing `seq`, and only the last 40 are kept. `src/components/arena/usePlayback.ts` plays events newer than the last one seen, one at a time:
+
+| Event | Effect |
+|---|---|
+| attack | attacker lunges toward the other side |
+| special | move-name banner, type-colored screen flash, type icon projectile |
+| hit | defender shakes and flashes red, a floating −N, the HP bar drains with a trailing chip, and floats for advantage ×1.5 / resisted ×0.7 / guard |
+| crit | "CRITICAL!", screen shake, phone vibration |
+| miss | defender dodges sideways, "MISS 💨" |
+| heal / buff / status / tick | glow, floating +N or the status icon |
+| guard | a shield bubble |
+| faint / switch | the fallen monster drops and greys out, the next one pops in |
+| win | confetti for the winner's screen |
+
+During playback, the cards show the HP and active monster of that moment, the battle log holds the previous lines so it doesn't spoil the outcome, and action buttons stay disabled. Sounds are synthesized with Web Audio (no asset files), and the 🔊/🔇 toggle is remembered per device. `prefers-reduced-motion` turns the animations off.
+
 ## Rooms
 
 1. A parent creates a room (`POST /api/arena/rooms`) with a difficulty, a prize (0–200) and optionally "let the system play". The server rolls a random 3-monster parent team and a 4-digit code.
