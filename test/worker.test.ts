@@ -4,6 +4,7 @@ import { makeTeam, startBattle } from "../shared/arena";
 
 async function resetDb() {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM arena_achievements"),
     env.DB.prepare("DELETE FROM arena_rooms"),
     env.DB.prepare("DELETE FROM gacha_spins"),
     env.DB.prepare("DELETE FROM quest_completions"),
@@ -772,7 +773,7 @@ describe("arena history", () => {
     const response = await history(await sessionCookie("child-user"));
     expect(response.status).toBe(200);
     const body = await response.json() as History;
-    expect(body.summary).toEqual({ played: 4, wins: 3, losses: 1, win_rate: 75, current_streak: 2, best_streak: 2 });
+    expect(body.summary).toEqual({ played: 4, wins: 3, losses: 1, win_rate: 75, current_streak: 2, best_streak: 2, tournaments: 0, championships: 0 });
     expect(body.by_difficulty).toEqual({ EASY: { wins: 1, losses: 0 }, NORMAL: { wins: 1, losses: 1 }, HARD: { wins: 1, losses: 0 } });
     expect(body.top_monsters[0]).toMatchObject({ monster: { name: "Charmander" }, battles: 4, wins: 3, damage: 130, mvp: 2 });
     expect(body.top_monsters[1]).toMatchObject({ monster: { name: "Squirtle" }, wins: 3, damage: 85, mvp: 1 });
@@ -797,7 +798,180 @@ describe("arena history", () => {
 
   it("returns an empty record before any battles", async () => {
     const body = await (await history(await sessionCookie("child-user"))).json() as History;
-    expect(body.summary).toEqual({ played: 0, wins: 0, losses: 0, win_rate: 0, current_streak: 0, best_streak: 0 });
+    expect(body.summary).toEqual({ played: 0, wins: 0, losses: 0, win_rate: 0, current_streak: 0, best_streak: 0, tournaments: 0, championships: 0 });
     expect(body.recent).toEqual([]);
+  });
+});
+
+describe("arena progression", () => {
+  type Results = {
+    rp: { before: number; after: number; delta: number; limited: boolean };
+    rank_ups: { key: string; bonus: number }[];
+    achievements: { code: string; points: number }[];
+    quests: { code: string; points: number }[];
+  };
+  type View = {
+    room: { code: string; status: string; version: number; winner: string | null; reward_points: number; mode: string; stage: number; auto_parent: boolean };
+    stage_teams: { id: string }[][] | null;
+    state: {
+      winner: string | null; round: number;
+      teams: Record<string, { ult?: number; fighters: { name: string; hp: number; stats: { hp: number } }[] }>;
+    } | null;
+    results: Results | null;
+  };
+  const get = (path: string, cookie: string) => SELF.fetch("https://example.test" + path, { headers: { cookie } });
+
+  async function start(body: Record<string, unknown>) {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    const created = await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 50, autoParent: true, ...body });
+    expect(created.status).toBe(201);
+    const { room, stage_teams } = await created.json() as View;
+    await post(`/api/arena/rooms/${room.code}/join`, kid, {});
+    const started = await (await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: [owned!.id] })).json() as View;
+    return { parent, kid, code: room.code, view: started, stageTeams: stage_teams };
+  }
+
+  // Leaves the opponent one 1-HP monster that can't dodge, so the child's next attack wins.
+  async function rigWin(code: string) {
+    const row = await env.DB.prepare("SELECT id, state FROM arena_rooms WHERE code = ? ORDER BY created_at DESC LIMIT 1").bind(code).first<{ id: string; state: string }>();
+    const state = JSON.parse(row!.state);
+    const foe = state.teams.PARENT;
+    foe.fighters = [foe.fighters[0]];
+    foe.active = 0;
+    Object.assign(foe.fighters[0], { hp: 1, statuses: [], guard: false });
+    foe.fighters[0].stats.eva = 0;
+    state.teams.CHILD.fighters.forEach((fighter: { statuses: unknown[] }) => { fighter.statuses = []; });
+    state.turn = "CHILD";
+    await env.DB.prepare("UPDATE arena_rooms SET state = ? WHERE id = ?").bind(JSON.stringify(state), row!.id).run();
+  }
+
+  async function attack(kid: string, code: string) {
+    const current = await (await get(`/api/arena/rooms/${code}`, kid)).json() as View;
+    const response = await post(`/api/arena/rooms/${code}/action`, kid, { version: current.room.version, action: "ATTACK" });
+    expect(response.status).toBe(200);
+    return await response.json() as View;
+  }
+
+  it("scores a won duel once: rank points, first-win achievement, and quest progress", async () => {
+    const { kid, code } = await start({});
+    await rigWin(code);
+    const done = await attack(kid, code);
+    expect(done.room).toMatchObject({ status: "FINISHED", winner: "CHILD" });
+    expect(done.results?.rp).toEqual({ before: 0, after: 15, delta: 15, limited: false });
+    expect(done.results?.achievements).toEqual([expect.objectContaining({ code: "FIRST_WIN", points: 20 })]);
+    expect((await env.DB.prepare("SELECT arena_rp FROM children WHERE id = 'child'").first<{ arena_rp: number }>())!.arena_rp).toBe(15);
+    const earned = await env.DB.prepare("SELECT reference_type, points FROM point_transactions WHERE reference_type IN ('ACHIEVEMENT','ARENA_QUEST')").all<{ reference_type: string; points: number }>();
+    expect(earned.results).toContainEqual({ reference_type: "ACHIEVEMENT", points: 20 });
+
+    // Reading the room again doesn't score it again.
+    await get(`/api/arena/rooms/${code}`, kid);
+    expect((await env.DB.prepare("SELECT arena_rp FROM children WHERE id = 'child'").first<{ arena_rp: number }>())!.arena_rp).toBe(15);
+
+    const profile = await (await get("/api/arena/profile", kid)).json() as {
+      rank: { key: string; rp: number };
+      achievements: { code: string; unlocked_at: string | null }[];
+      quests: { list: { code: string; progress: number; target: number; done: boolean }[] };
+    };
+    expect(profile.rank).toMatchObject({ key: "BRONZE", rp: 15 });
+    expect(profile.achievements.find((entry) => entry.code === "FIRST_WIN")?.unlocked_at).toBeTruthy();
+    expect(profile.achievements.find((entry) => entry.code === "WINS_10")?.unlocked_at).toBeNull();
+    expect(profile.quests.list).toHaveLength(3);
+    const play = profile.quests.list.find((quest) => quest.code === "PLAY_2");
+    if (play) expect(play.progress).toBe(1);
+    const win = profile.quests.list.find((quest) => quest.code === "WIN_1");
+    if (win) expect(win.done).toBe(true);
+    // Quests paid in the result match the ones marked done.
+    expect(done.results!.quests.map((quest) => quest.code).sort()).toEqual(profile.quests.list.filter((quest) => quest.done).map((quest) => quest.code).sort());
+
+    // Parents see their child's profile; other parents don't.
+    const parentView = await get("/api/arena/profile?childId=child", await sessionCookie("parent"));
+    expect(parentView.status).toBe(200);
+    await env.DB.prepare("INSERT INTO users (id, display_name, role) VALUES ('stranger', 'Stranger', 'PARENT')").run();
+    expect((await get("/api/arena/profile?childId=child", await sessionCookie("stranger"))).status).toBe(404);
+  });
+
+  it("pays a rank-up bonus only the first time the tier is reached", async () => {
+    await env.DB.prepare("UPDATE children SET arena_rp = 95 WHERE id = 'child'").run();
+    const first = await start({});
+    await rigWin(first.code);
+    const won = await attack(first.kid, first.code);
+    expect(won.results?.rank_ups).toEqual([expect.objectContaining({ key: "SILVER", bonus: 50 })]);
+
+    await env.DB.prepare("UPDATE children SET arena_rp = 95 WHERE id = 'child'").run();
+    const { room } = await (await post("/api/arena/rooms", first.parent, { difficulty: "EASY", prize: 0, autoParent: true })).json() as View;
+    await post(`/api/arena/rooms/${room.code}/join`, first.kid, {});
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    await post(`/api/arena/rooms/${room.code}/team`, first.kid, { childCharacterIds: [owned!.id] });
+    await rigWin(room.code);
+    const again = await attack(first.kid, room.code);
+    expect(again.results?.rank_ups).toEqual([expect.objectContaining({ key: "SILVER", bonus: 0 })]);
+    const bonuses = await env.DB.prepare("SELECT count(*) AS n FROM point_transactions WHERE reference_type = 'ARENA_RANK'").first<{ n: number }>();
+    expect(bonuses!.n).toBe(1);
+  });
+
+  it("runs a three-round tournament and crowns a champion", async () => {
+    const { parent, kid, code, view, stageTeams } = await start({ mode: "TOURNAMENT", autoParent: false, prize: 120 });
+    expect(stageTeams).toHaveLength(3);
+    expect(view.room).toMatchObject({ mode: "TOURNAMENT", stage: 1, auto_parent: true, status: "BATTLE" });
+
+    // Can't skip ahead before winning the round.
+    expect((await post(`/api/arena/rooms/${code}/next`, kid, {})).status).toBe(409);
+
+    for (const stage of [1, 2]) {
+      await rigWin(code);
+      const won = await attack(kid, code);
+      // A won round keeps the room open and pays nothing yet.
+      expect(won.room).toMatchObject({ status: "BATTLE", stage, winner: null, reward_points: 0 });
+      expect(won.state?.winner).toBe("CHILD");
+      expect((await post(`/api/arena/rooms/${code}/next`, parent, {})).status).toBe(403);
+      const next = await post(`/api/arena/rooms/${code}/next`, kid, {});
+      expect(next.status).toBe(200);
+      const moved = await next.json() as View;
+      expect(moved.room.stage).toBe(stage + 1);
+      expect(moved.state).toMatchObject({ winner: null, round: 1 });
+      // Double tap doesn't skip a round.
+      expect((await post(`/api/arena/rooms/${code}/next`, kid, {})).status).toBe(409);
+    }
+
+    await rigWin(code);
+    const champion = await attack(kid, code);
+    expect(champion.room).toMatchObject({ status: "FINISHED", winner: "CHILD", stage: 3, reward_points: 120 });
+    expect(champion.results?.rp.delta).toBe(75);
+    expect(champion.results?.achievements.map((entry) => entry.code)).toEqual(expect.arrayContaining(["FIRST_WIN", "CHAMPION"]));
+    const ledger = await env.DB.prepare("SELECT reason FROM point_transactions WHERE reference_type = 'ARENA'").all<{ reason: string }>();
+    expect(ledger.results).toEqual([{ reason: "👑 แชมป์ทัวร์นาเมนต์ Arena" }]);
+
+    const history = await (await get("/api/arena/history", kid)).json() as {
+      summary: { tournaments: number; championships: number };
+      by_difficulty: Record<string, { wins: number }>;
+      recent: { mode: string; stage: number }[];
+    };
+    expect(history.summary).toMatchObject({ tournaments: 1, championships: 1 });
+    expect(history.by_difficulty.HARD.wins).toBe(0);
+    expect(history.recent[0]).toMatchObject({ mode: "TOURNAMENT", stage: 3 });
+  });
+
+  it("pays tournament consolation by the round reached", async () => {
+    const { kid, code } = await start({ mode: "TOURNAMENT" });
+    await rigWin(code);
+    await attack(kid, code);
+    await post(`/api/arena/rooms/${code}/next`, kid, {});
+    // Round 2: leave the child one 1-HP monster that can't dodge, and make the AI's hit certain.
+    const row = await env.DB.prepare("SELECT id, state FROM arena_rooms WHERE code = ?").bind(code).first<{ id: string; state: string }>();
+    const state = JSON.parse(row!.state);
+    Object.assign(state.teams.CHILD.fighters[0], { hp: 1, statuses: [] });
+    state.teams.CHILD.fighters[0].stats.eva = 0;
+    state.teams.CHILD.fighters = [state.teams.CHILD.fighters[0]];
+    state.teams.PARENT.fighters.forEach((fighter: { hp: number; stats: { hp: number } }) => { fighter.hp = fighter.stats.hp; });
+    state.teams.PARENT.ult = 100; // the AI always fires a ready ultimate, which can't miss
+    await env.DB.prepare("UPDATE arena_rooms SET state = ? WHERE id = ?").bind(JSON.stringify(state), row!.id).run();
+    // The child guards (can't lose on their own move); the auto parent's ultimate finishes it.
+    const current = await (await get(`/api/arena/rooms/${code}`, kid)).json() as View;
+    const lost = await (await post(`/api/arena/rooms/${code}/action`, kid, { version: current.room.version, action: "GUARD" })).json() as View;
+    expect(lost.room).toMatchObject({ status: "FINISHED", winner: "PARENT", stage: 2, reward_points: 20 });
+    expect(lost.results?.rp.delta).toBe(7);
   });
 });

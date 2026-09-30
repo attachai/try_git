@@ -162,6 +162,48 @@ Rewards: the child gets the prize for a win or +10 for a loss, on up to 3 rooms 
 
 Children see it under the code entry on the Arena screen. Parents see it in the Arena tab, with a picker when they have more than one child.
 
+## Tournament
+
+A parent can create a room with `mode: "TOURNAMENT"`: three rounds in a row against the system (it always plays the opponents).
+
+| Round | Opponent rarities | Stats | Level |
+|---|---|---|---|
+| 🥊 รอบคัดเลือก | COMMON/RARE | ×0.75 | child team average |
+| ⚔️ รอบรองชนะเลิศ | no LEGENDARY | ×0.8 | average +1 |
+| 👑 รอบชิงชนะเลิศ | anything | ×0.9 | average +2 |
+
+- The child sees all three opponent teams before picking, and plays the whole tournament with one team.
+- Between rounds every monster heals 60% of max HP (fainted ones come back at 60%) and statuses clear. The ultimate gauge, the carried item, damage dealt, and the tallies carry over.
+- Each round has a new random arena (the parent picks the first one).
+- After a won round the room stays in `BATTLE` with `state.winner = "CHILD"`; the child calls `POST /api/arena/rooms/:code/next` to start the next round. Rewards, XP, and scoring happen once, when the tournament ends.
+- Champion: the prize (0–200). Knocked out: +10 per round reached. XP gets +10 per round cleared.
+- Balance (AI vs AI, 2,000 runs each): a random COMMON/RARE Lv.1 team becomes champion ~21% of the time, a Lv.3 team with EPICs ~42%. Round 1 is a warm-up (~98% win). With the duel stats (×0.85/1.0/1.1) and a 50% heal it was 1–6%.
+
+## Rank, achievements, and arena quests
+
+Every finished room is scored once (`arena_rooms.results` is the guard) after rewards and XP. The rules live in `shared/progression.ts`.
+
+**Rank** (`children.arena_rp`):
+
+| Tier | From | First-time bonus |
+|---|---|---|
+| 🥉 บรอนซ์ | 0 RP | – |
+| 🥈 ซิลเวอร์ | 100 | 50 |
+| 🥇 โกลด์ | 250 | 100 |
+| 💎 ไดมอนด์ | 500 | 150 |
+| 👑 มาสเตอร์ | 900 | 200 |
+
+- Duel win: EASY +15, NORMAL +25, HARD +35. Loss: −8, but never below the floor of the child's current tier.
+- Tournament: +15 per round cleared, then +30 for the title or −8 for being knocked out.
+- Rank points only count on rooms that also earned XP (5 per day), so easy rooms can't be farmed.
+- The bonus is paid once per tier ever (`reference_type = 'ARENA_RANK'`).
+
+**Achievements** (`arena_achievements`, paid once each with `reference_type = 'ACHIEVEMENT'`): ชัยชนะแรก, 10 and 50 wins, 3 and 7 win streaks, a HARD duel win, a flawless win with 3 monsters, a comeback with the last monster under 25% HP, finishing with an ultimate, 3 combos in one room, winning in all 6 arenas, a Lv.10 monster, and a tournament title. Wins and streaks count from the child's whole history, so older wins count the next time a room finishes.
+
+**Arena quests**: three per child per Thailand-time day, picked by a hash of child id + day from: play 2 rooms, win 1, win NORMAL+ or a tournament, 2 ultimates, 1 combo, 5 super-effective hits, 3 crits, 1 switch. Progress adds up over today's scored rooms using the battle tallies (`state.tally`). A quest pays when a room finishes and completes it (`reference_type = 'ARENA_QUEST'`, one per quest per day).
+
+`GET /api/arena/profile` (child: their own; parent: `?childId=`) returns the rank, all achievements with unlock times, and today's quests with progress. The finished room's view includes `results` (rank change, rank-ups, new achievements, completed quests) for the result card.
+
 ## Balance check (simulation, AI vs AI, 2,000 battles each)
 
 | Scenario | Result |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeFighter, aiSwitchTarget, aiTurn, applyAction, ArenaError, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle, type BattleState, type Rng } from "../shared/arena";
+import { activeFighter, aiSwitchTarget, aiTurn, applyAction, ArenaError, carryOver, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle, startNextStage, TOURNAMENT_HEAL, ULT_MAX, type BattleState, type Rng } from "../shared/arena";
 
 const mon = (id: string, type_primary: string, rarity = "COMMON", type_secondary: string | null = null) =>
   ({ id, name: id, image_url: "", rarity, type_primary, type_secondary });
@@ -347,5 +347,55 @@ describe("arena themes and field events", () => {
     state = applyAction(state, "CHILD", "GUARD", steady);
     state = applyAction(state, "PARENT", "GUARD", script(0.1, 0.9));
     expect(state.events!.find((e) => e.fieldEvent === "GIFT")).toMatchObject({ side: "CHILD" });
+  });
+});
+
+describe("tallies and tournaments", () => {
+  it("counts crits, super-effective hits, and the finishing move", () => {
+    let state = battle([mon("Charmander", "Fire")], [mon("Bulbasaur", "Grass")]);
+    state = applyAction(state, "CHILD", "ATTACK", script(0.99, 0, 0.5));
+    expect(state.tally?.CHILD).toMatchObject({ crits: 1, supers: 1, ults: 0 });
+    expect(state.tally?.PARENT.crits).toBe(0);
+
+    state.teams.PARENT.fighters[0].hp = 1;
+    state.turn = "CHILD";
+    state.teams.CHILD.ult = ULT_MAX;
+    state = applyAction(state, "CHILD", "ULTIMATE", steady);
+    expect(state.winner).toBe("CHILD");
+    expect(state.finisher).toBe("ULTIMATE");
+    expect(state.tally?.CHILD.ults).toBe(1);
+  });
+
+  it("loads battles saved before tallies existed", () => {
+    const state = battle();
+    delete state.tally;
+    expect(applyAction(state, "CHILD", "ATTACK", steady).tally).toBeUndefined();
+  });
+
+  it("carries the child team into the next round, healed and revived", () => {
+    const state = battle([mon("Charmander", "Fire"), mon("Squirtle", "Water")]);
+    const [first, second] = state.teams.CHILD.fighters;
+    first.hp = 0;
+    second.hp = Math.round(second.stats.hp * 0.2);
+    second.statuses = [{ kind: "BURN", turns: 2 }];
+    state.teams.CHILD.active = 1;
+    state.teams.CHILD.energy = 4;
+    state.teams.CHILD.ult = 70;
+    state.teams.CHILD.item = { kind: "POTION", used: true };
+    state.tally!.CHILD.combos = 2;
+    state.winner = "CHILD";
+
+    const team = carryOver(state.teams.CHILD);
+    expect(team.fighters[0].hp).toBe(Math.round(first.stats.hp * TOURNAMENT_HEAL));
+    expect(team.fighters[1].hp).toBe(Math.min(second.stats.hp, second.hp + Math.round(second.stats.hp * TOURNAMENT_HEAL)));
+    expect(team.fighters[1].statuses).toEqual([]);
+    expect(team).toMatchObject({ active: 0, energy: 0, ult: 70, item: { kind: "POTION", used: true } });
+
+    const next = startNextStage(state, makeTeam([mon("Geodude", "Rock")]));
+    expect(next).toMatchObject({ winner: null, round: 1, turn: "CHILD" });
+    expect(next.tally?.CHILD.combos).toBe(2);
+    expect(next.teams.PARENT.fighters[0].name).toBe("Geodude");
+    // The previous round's state is untouched.
+    expect(state.teams.CHILD.fighters[0].hp).toBe(0);
   });
 });
