@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { computeStats, typeMultiplier, weakTo } from "../../../shared/battle";
-import { ITEMS, parentLevelFor, WEATHER, weatherMultiplier, type ItemKind } from "../../../shared/arena";
+import { ITEMS, parentLevelFor, THEMES, WEATHER, weatherMultiplier, type ItemKind } from "../../../shared/arena";
 import { TYPE_INFO, TypeBadges } from "../TypeBadge";
 import ArenaHistory from "./ArenaHistory";
 import BattleView from "./BattleView";
@@ -118,8 +118,14 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
         </section>
 
         <section className="panel">
+          {view.room.theme && (
+            <div className={"arena-theme-card theme-" + view.room.theme.toLowerCase()}>
+              <strong>{THEMES[view.room.theme].icon} สนาม{THEMES[view.room.theme].label}</strong>
+              <small>กฎพิเศษ: {THEMES[view.room.theme].rule}</small>
+            </div>
+          )}
           <div className={"arena-field field-" + view.room.weather.toLowerCase()}>
-            <span>สนามวันนี้: {WEATHER[view.room.weather].icon} {WEATHER[view.room.weather].label}</span>
+            <span>อากาศ: {WEATHER[view.room.weather].icon} {WEATHER[view.room.weather].label}</span>
             <small>
               {WEATHER[view.room.weather].boost.length ? "ช่วย " + WEATHER[view.room.weather].boost.map((type) => TYPE_INFO[type]?.icon).join("") + " +20%" : "ไม่มีผลกับธาตุ"}
               {WEATHER[view.room.weather].weaken.length ? " · กด " + WEATHER[view.room.weather].weaken.map((type) => TYPE_INFO[type]?.icon).join("") + " −20%" : ""}

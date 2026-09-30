@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ITEMS, STATUS_INFO, WEATHER, type BattleEvent, type BattleState, type Side } from "../../../shared/arena";
+import { FIELD_EVENTS, ITEMS, STATUS_INFO, WEATHER, type BattleEvent, type BattleState, type FieldEventKind, type Side } from "../../../shared/arena";
 import { TYPE_ICON } from "../../../shared/types";
 import { buzz, sfx } from "./sound";
 
@@ -13,11 +13,12 @@ export type Fx = {
   confetti: boolean;
   cutin: { side: Side; name: string; type: string; index: number } | null;
   commentary: { id: number; text: string; tone: string } | null;
+  field: { kind: FieldEventKind; side: Side } | null;
 };
 // What the cards should show while events play: which fighter is out and its HP.
 export type Display = { active: Record<Side, number>; hp: Record<Side, number[]> };
 
-const EMPTY_FX: Fx = { sprite: {}, floats: [], banner: null, screen: "", projectile: null, confetti: false, cutin: null, commentary: null };
+const EMPTY_FX: Fx = { sprite: {}, floats: [], banner: null, screen: "", projectile: null, confetti: false, cutin: null, commentary: null, field: null };
 const COMMENTARY_MS = 1500;
 const STREAK_CALLOUT = 3;
 const FLOAT_MS = 1200;
@@ -26,7 +27,7 @@ const FLOAT_MS = 1200;
 const DURATION: Record<BattleEvent["kind"], number> = {
   attack: 350, special: 750, ultimate: 1400, hit: 650, miss: 550, heal: 550, status: 450, buff: 450,
   tick: 500, guard: 450, paralyzed: 450, faint: 800, switch: 550, win: 1000,
-  weather: 1300, combo: 700, item: 600, recall: 400,
+  weather: 1300, combo: 700, item: 600, recall: 400, field: 1000,
 };
 
 function snapshot(state: BattleState): Display {
@@ -82,7 +83,7 @@ export function usePlayback(state: BattleState, me: Side) {
 
     function play(event: BattleEvent) {
       const foe: Side = event.side === "CHILD" ? "PARENT" : "CHILD";
-      setFx((fx) => ({ ...fx, sprite: {}, banner: null, screen: "", projectile: null, cutin: null }));
+      setFx((fx) => ({ ...fx, sprite: {}, banner: null, screen: "", projectile: null, cutin: null, field: null }));
       switch (event.kind) {
         case "attack":
           sfx.swing();
@@ -163,6 +164,19 @@ export function usePlayback(state: BattleState, me: Side) {
           sfx.special();
           setFx((fx) => ({ ...fx, banner: { text: "🌦️ สนามเปลี่ยน! " + field.icon + " " + field.label, type: "weather" }, screen: "flash flash-normal" }));
           say(field.icon + " " + field.label + "!", "cool");
+          break;
+        }
+        case "field": {
+          const kind = event.fieldEvent ?? "RAINBOW";
+          const info = FIELD_EVENTS[kind];
+          if (kind === "METEOR" || kind === "LAVA") { sfx.crit(); buzz(80); } else if (kind === "LIGHTNING") { sfx.crit(); } else if (kind === "CHEER") { sfx.win(); } else { sfx.heal(); }
+          setFx((fx) => ({
+            ...fx,
+            field: { kind, side: event.side },
+            screen: kind === "METEOR" || kind === "LIGHTNING" ? "shake" : kind === "LAVA" ? "flash flash-fire" : "",
+            banner: kind === "CHEER" ? null : { text: info.icon + " " + info.label, type: "weather" },
+          }));
+          if (kind === "CHEER") say("📣 คนดูเชียร์สนั่น!", "hype");
           break;
         }
         case "combo":

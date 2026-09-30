@@ -30,6 +30,8 @@ export type Fighter = {
 // `ult` is the ultimate gauge (0–ULT_MAX); optional so older battles still load.
 export type ItemKind = "POTION" | "ETHER" | "CLEANSE";
 export type WeatherKind = "CLEAR" | "SUN" | "RAIN" | "STORM" | "SNOW" | "SAND";
+export type ThemeKind = "VOLCANO" | "BEACH" | "FOREST" | "SNOWPEAK" | "SPACE" | "STADIUM";
+export type FieldEventKind = "METEOR" | "LIGHTNING" | "RAINBOW" | "GIFT" | "LAVA" | "CHEER";
 // `ult` is the ultimate gauge (0–ULT_MAX); `item` is the child's one carried item.
 // Both optional so older battles still load.
 export type Team = { fighters: Fighter[]; active: number; energy: number; ult?: number; item?: { kind: ItemKind; used: boolean } };
@@ -38,7 +40,7 @@ export type Team = { fighters: Fighter[]; active: number; energy: number; ult?: 
 export type BattleEvent = {
   seq: number;
   kind: "attack" | "special" | "ultimate" | "hit" | "miss" | "heal" | "status" | "buff" | "tick" | "guard" | "paralyzed"
-    | "faint" | "switch" | "win" | "weather" | "combo" | "item" | "recall";
+    | "faint" | "switch" | "win" | "weather" | "combo" | "item" | "recall" | "field";
   side: Side;
   index: number;
   hp?: number;
@@ -53,6 +55,7 @@ export type BattleEvent = {
   weather?: WeatherKind;
   combo?: string;
   item?: ItemKind;
+  fieldEvent?: FieldEventKind;
 };
 export type BattleState = {
   turn: Side;
@@ -65,6 +68,8 @@ export type BattleState = {
   eventSeq?: number;
   weather?: WeatherKind;
   weatherUntil?: number; // round at which the field changes next
+  theme?: ThemeKind;
+  fieldEvents?: number; // random field events so far
 };
 export type Rng = () => number;
 
@@ -166,10 +171,45 @@ export function weatherMultiplier(weather: WeatherKind | undefined, attackType: 
   return 1;
 }
 
-export function rollWeather(rng: Rng, not?: WeatherKind): WeatherKind {
-  const options = WEATHER_KINDS.filter((kind) => kind !== not);
+export function rollWeather(rng: Rng, not?: WeatherKind, pool: WeatherKind[] = WEATHER_KINDS): WeatherKind {
+  const options = pool.filter((kind) => kind !== not);
   return options[Math.floor(rng() * options.length)] ?? "CLEAR";
 }
+
+// Arena themes: a backdrop, the weather it tends to have, and one house rule.
+export const THEMES: Record<ThemeKind, { icon: string; label: string; rule: string; weather: WeatherKind[] }> = {
+  VOLCANO: { icon: "🌋", label: "ภูเขาไฟ", rule: "ทุก 3 รอบลาวาปะทุ ตัวที่ไม่ใช่ 🔥 เสีย HP 5%", weather: ["SUN", "SUN", "SAND", "CLEAR"] },
+  BEACH: { icon: "🌊", label: "ชายหาด", rule: "💧 ฟื้น HP 3% ทุกตา", weather: ["RAIN", "RAIN", "SUN", "CLEAR", "STORM"] },
+  FOREST: { icon: "🌲", label: "ป่าลึก", rule: "🌿 และ 🐛 หลบ +8%", weather: ["RAIN", "CLEAR", "CLEAR", "STORM"] },
+  SNOWPEAK: { icon: "🏔️", label: "ยอดเขาหิมะ", rule: "ตีโดนมีโอกาส 10% ให้ศัตรูแช่แข็ง 1 ตา", weather: ["SNOW", "SNOW", "SNOW", "CLEAR"] },
+  SPACE: { icon: "🌌", label: "อวกาศ", rule: "ทุกตัวหลบ +10% · ท่าพิเศษใช้ ⚡2 · ไม่มีสภาพอากาศ", weather: ["CLEAR"] },
+  STADIUM: { icon: "🏟️", label: "สเตเดียม", rule: "คริหรือได้เปรียบธาตุ คนดูเชียร์ หลอดไม้ตาย +10", weather: WEATHER_KINDS },
+};
+export const THEME_KINDS = Object.keys(THEMES) as ThemeKind[];
+export const LAVA_EVERY = 3;
+export const LAVA_DAMAGE = 0.05;
+export const BEACH_HEAL = 0.03;
+export const FOREST_EVADE = 8;
+export const SPACE_EVADE = 10;
+export const SNOW_FREEZE_CHANCE = 0.1;
+export const CHEER_ULT = 10;
+
+export function specialCost(state: Pick<BattleState, "theme">) {
+  return state.theme === "SPACE" ? SPECIAL_COST - 1 : SPECIAL_COST;
+}
+
+// Random field events: from round FIELD_EVENT_FROM, FIELD_EVENT_CHANCE per round, at most FIELD_EVENT_MAX.
+export const FIELD_EVENT_FROM = 3;
+export const FIELD_EVENT_CHANCE = 0.2;
+export const FIELD_EVENT_MAX = 2;
+export const FIELD_EVENTS: Record<FieldEventKind, { icon: string; label: string }> = {
+  METEOR: { icon: "☄️", label: "อุกกาบาตตก!" },
+  LIGHTNING: { icon: "⚡", label: "ฟ้าผ่า!" },
+  RAINBOW: { icon: "🌈", label: "สายรุ้งปรากฏ!" },
+  GIFT: { icon: "🎁", label: "กล่องของขวัญหล่นมา!" },
+  LAVA: { icon: "🌋", label: "ลาวาปะทุ!" },
+  CHEER: { icon: "📣", label: "คนดูเชียร์!" },
+};
 
 // Element combos: a mark (or status) on the defender plus the right attack type.
 export const COMBO_MULTIPLIER = 1.3;
@@ -224,10 +264,12 @@ export function parentLevelFor(childLevels: number[]) {
   return Math.max(1, Math.floor(childLevels.reduce((sum, level) => sum + level, 0) / childLevels.length));
 }
 
-export function startBattle(child: Team, parent: Team, weather: WeatherKind = "CLEAR"): BattleState {
+export function startBattle(child: Team, parent: Team, weather: WeatherKind = "CLEAR", theme?: ThemeKind): BattleState {
+  const space = theme === "SPACE";
   const state: BattleState = {
     turn: "CHILD", round: 1, teams: { CHILD: child, PARENT: parent }, log: [], winner: null,
-    weather, weatherUntil: 1 + WEATHER_ROUNDS,
+    weather: space ? "CLEAR" : weather, weatherUntil: space ? undefined : 1 + WEATHER_ROUNDS,
+    theme, fieldEvents: 0,
   };
   push(state, "⚔️ เริ่มการต่อสู้! " + child.fighters[0].name + " ปะทะ " + parent.fighters[0].name);
   return state;
@@ -273,9 +315,11 @@ function effectiveDef(fighter: Fighter) {
   return def;
 }
 
-function effectiveEva(fighter: Fighter) {
+function effectiveEva(state: BattleState, fighter: Fighter) {
   if (has(fighter, "FREEZE")) return 0;
   let eva = fighter.stats.eva;
+  if (state.theme === "SPACE") eva += SPACE_EVADE;
+  if (state.theme === "FOREST" && (fighter.type_primary === "Grass" || fighter.type_primary === "Bug")) eva += FOREST_EVADE;
   if (has(fighter, "SWIFT")) eva += 15;
   if (has(fighter, "CONFUSE")) eva -= 10;
   return Math.max(0, Math.min(EVADE_CAP, eva));
@@ -308,7 +352,7 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, 
   });
 
   // Special moves never miss, so saving energy for one is always worth it.
-  if (!special && rng() * 100 < effectiveEva(defender)) {
+  if (!special && rng() * 100 < effectiveEva(state, defender)) {
     push(state, attacker.name + " " + move + " → " + defender.name + " หลบได้! 💨");
     emit(state, { kind: "miss", side: other(side), index: defenderIndex });
     return;
@@ -334,6 +378,8 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, 
   state.teams[other(side)].energy = Math.min(ENERGY_MAX, state.teams[other(side)].energy + 1);
   if (!ultimate) gainUlt(state.teams[side], ULT_ON_HIT);
   gainUlt(state.teams[other(side)], ULT_ON_HURT);
+  const cheer = state.theme === "STADIUM" && (crit || multiplier >= 1.5);
+  if (cheer) gainUlt(state.teams[side], CHEER_ULT);
 
   push(state, attacker.name + " " + move + multiplierText(multiplier)
     + (field > 1 ? " สนามช่วย " + WEATHER[state.weather ?? "CLEAR"].icon : field < 1 ? " สนามกด " + WEATHER[state.weather ?? "CLEAR"].icon : "")
@@ -346,6 +392,15 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, 
   }
   const mark = MARK_FROM[attacker.type_primary];
   if (mark && defender.hp > 0 && !combo) addStatus(defender, mark, MARK_TURNS);
+  if (cheer) {
+    push(state, "📣 คนดูเชียร์ " + attacker.name + "! หลอดไม้ตาย +" + CHEER_ULT);
+    emit(state, { kind: "field", side, index: attackerIndex, fieldEvent: "CHEER" });
+  }
+  if (state.theme === "SNOWPEAK" && defender.hp > 0 && !has(defender, "FREEZE") && rng() < SNOW_FREEZE_CHANCE) {
+    addStatus(defender, "FREEZE", 1);
+    push(state, "🏔️ ลมหิมะ! " + defender.name + " ติด ❄️ แช่แข็ง 1 ตา");
+    emit(state, { kind: "status", side: other(side), index: defenderIndex, status: "FREEZE" });
+  }
   emit(state, {
     kind: "hit", side: other(side), index: defenderIndex, amount: damage, hp: defender.hp, max: defender.stats.hp,
     crit, multiplier, guarded, type: attacker.type_primary,
@@ -392,6 +447,85 @@ function endOfTurn(state: BattleState, side: Side) {
   fighter.statuses = fighter.statuses
     .map((status) => ({ ...status, turns: status.turns - 1 }))
     .filter((status) => status.turns > 0);
+  if (state.theme === "BEACH" && fighter.type_primary === "Water" && fighter.hp > 0) {
+    heal(state, side, Math.max(1, Math.round(fighter.stats.hp * BEACH_HEAL)), "🌊");
+  }
+}
+
+function heal(state: BattleState, side: Side, amount: number, icon: string) {
+  const fighter = activeFighter(state, side);
+  const healed = Math.min(amount, fighter.stats.hp - fighter.hp);
+  if (healed <= 0 || fighter.hp <= 0) return;
+  fighter.hp += healed;
+  push(state, icon + " " + fighter.name + " ฟื้น +" + healed + " HP 💚 " + hpText(fighter));
+  emit(state, { kind: "heal", side, index: state.teams[side].active, amount: healed, hp: fighter.hp, max: fighter.stats.hp });
+}
+
+function hurt(state: BattleState, side: Side, amount: number, icon: string) {
+  const fighter = activeFighter(state, side);
+  if (fighter.hp <= 0) return;
+  const damage = Math.min(fighter.hp, Math.max(1, amount));
+  fighter.hp -= damage;
+  push(state, icon + " " + fighter.name + " −" + damage + " HP (" + fighter.hp + "/" + fighter.stats.hp + ")");
+  emit(state, { kind: "tick", side, index: state.teams[side].active, amount: damage, hp: fighter.hp, max: fighter.stats.hp });
+}
+
+function teamHpShare(team: Team) {
+  const max = team.fighters.reduce((sum, fighter) => sum + fighter.stats.hp, 0);
+  return team.fighters.reduce((sum, fighter) => sum + fighter.hp, 0) / max;
+}
+
+function fieldEvent(state: BattleState, kind: FieldEventKind, side: Side = "CHILD") {
+  const info = FIELD_EVENTS[kind];
+  push(state, info.icon + " " + info.label);
+  emit(state, { kind: "field", side, index: state.teams[side].active, fieldEvent: kind });
+}
+
+// Everything that happens as a new round begins: weather rotation, theme hazards, random field events.
+function roundStart(state: BattleState, rng: Rng) {
+  // Battles saved before weather existed have no weatherUntil and keep a clear field.
+  if (state.weatherUntil && state.round >= state.weatherUntil) {
+    state.weather = rollWeather(rng, state.weather, state.theme ? THEMES[state.theme].weather : WEATHER_KINDS);
+    state.weatherUntil = state.round + WEATHER_ROUNDS;
+    const field = WEATHER[state.weather];
+    push(state, "🌦️ สภาพสนามเปลี่ยน! " + field.icon + " " + field.label);
+    emit(state, { kind: "weather", side: "CHILD", index: 0, weather: state.weather });
+  }
+
+  if (state.theme === "VOLCANO" && state.round % LAVA_EVERY === 0) {
+    fieldEvent(state, "LAVA");
+    for (const side of ["CHILD", "PARENT"] as Side[]) {
+      const fighter = activeFighter(state, side);
+      if (fighter.type_primary !== "Fire") hurt(state, side, Math.round(fighter.stats.hp * LAVA_DAMAGE), "🌋");
+    }
+  }
+
+  if (state.fieldEvents === undefined || state.round < FIELD_EVENT_FROM || state.fieldEvents >= FIELD_EVENT_MAX) return;
+  if (rng() >= FIELD_EVENT_CHANCE) return;
+  state.fieldEvents += 1;
+  const kinds: FieldEventKind[] = ["METEOR", "LIGHTNING", "RAINBOW", "GIFT"];
+  const kind = kinds[Math.floor(rng() * kinds.length)] ?? "RAINBOW";
+  if (kind === "METEOR") {
+    const side: Side = rng() < 0.5 ? "CHILD" : "PARENT";
+    fieldEvent(state, kind, side);
+    hurt(state, side, Math.round(activeFighter(state, side).stats.hp * 0.1), "☄️");
+  } else if (kind === "LIGHTNING") {
+    const wet = (["CHILD", "PARENT"] as Side[]).filter((side) => has(activeFighter(state, side), "WET"));
+    fieldEvent(state, kind, wet[0] ?? "CHILD");
+    if (wet.length === 0) push(state, "⚡ ฟ้าผ่าลงพื้น ไม่มีใครโดน!");
+    for (const side of wet) hurt(state, side, Math.round(activeFighter(state, side).stats.hp * 0.12), "⚡");
+  } else if (kind === "RAINBOW") {
+    fieldEvent(state, kind);
+    for (const side of ["CHILD", "PARENT"] as Side[]) heal(state, side, Math.round(activeFighter(state, side).stats.hp * 0.1), "🌈");
+  } else {
+    // The gift helps whoever is behind, so it can swing a lopsided game.
+    const side: Side = teamHpShare(state.teams.CHILD) <= teamHpShare(state.teams.PARENT) ? "CHILD" : "PARENT";
+    fieldEvent(state, kind, side);
+    const team = state.teams[side];
+    team.energy = Math.min(ENERGY_MAX, team.energy + 2);
+    gainUlt(team, 30);
+    push(state, "🎁 " + (side === "CHILD" ? "ลูก" : "ผู้ปกครอง") + " ได้ ⚡+2 และหลอดไม้ตาย +30");
+  }
 }
 
 function replaceFainted(state: BattleState) {
@@ -421,7 +555,7 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   const next: BattleState = structuredClone(state);
   const team = next.teams[side];
   const fighter = activeFighter(next, side);
-  if (action === "SPECIAL" && team.energy < SPECIAL_COST) throw new ArenaError("พลังไม่พอ ต้องมี ⚡ " + SPECIAL_COST);
+  if (action === "SPECIAL" && team.energy < specialCost(next)) throw new ArenaError("พลังไม่พอ ต้องมี ⚡ " + specialCost(next));
   if (action === "ULTIMATE" && ultOf(team) < ULT_MAX) throw new ArenaError("หลอดไม้ตายยังไม่เต็ม");
   if (action === "SWITCH") {
     const bench = target === undefined ? undefined : team.fighters[target];
@@ -466,7 +600,7 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
     team.ult = 0;
     hit(next, side, SPECIALS[fighter.type_primary] ?? SPECIALS.Normal, rng, true);
   } else if (action === "SPECIAL") {
-    team.energy -= SPECIAL_COST;
+    team.energy -= specialCost(next);
     hit(next, side, SPECIALS[fighter.type_primary] ?? SPECIALS.Normal, rng);
   } else {
     hit(next, side, null, rng);
@@ -484,13 +618,13 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   next.turn = other(side);
   if (next.turn === "CHILD") {
     next.round += 1;
-    // Battles saved before weather existed have no weatherUntil and keep a clear field.
-    if (next.weatherUntil && next.round >= next.weatherUntil) {
-      next.weather = rollWeather(rng, next.weather);
-      next.weatherUntil = next.round + WEATHER_ROUNDS;
-      const field = WEATHER[next.weather];
-      push(next, "🌦️ สภาพสนามเปลี่ยน! " + field.icon + " " + field.label);
-      emit(next, { kind: "weather", side: "CHILD", index: 0, weather: next.weather });
+    roundStart(next, rng);
+    // Hazards can knock monsters out too (re-read: TS thinks winner is still null here).
+    replaceFainted(next);
+    const winner = next.winner as Side | null;
+    if (winner) {
+      push(next, winner === "CHILD" ? "🏆 ลูกชนะ!" : "🏆 ผู้ปกครองชนะ!");
+      emit(next, { kind: "win", side: winner, index: next.teams[winner].active });
     }
   }
   return next;
@@ -504,7 +638,7 @@ export function chooseAiAction(state: BattleState, side: Side, rng: Rng): Action
   if (aiSwitchTarget(state, side) !== null && rng() < 0.3) return "SWITCH";
   // Brace when the other side's ultimate is ready and this monster can't take it.
   if (ultOf(state.teams[other(side)]) >= ULT_MAX && me.hp < me.stats.hp * 0.6 && rng() < 0.5) return "GUARD";
-  if (state.teams[side].energy >= SPECIAL_COST && (typeMultiplier(me.type_primary, foe) >= 1 || rng() < 0.5)) return "SPECIAL";
+  if (state.teams[side].energy >= specialCost(state) && (typeMultiplier(me.type_primary, foe) >= 1 || rng() < 0.5)) return "SPECIAL";
   if (me.hp < me.stats.hp * 0.35 && rng() < 0.4) return "GUARD";
   return "ATTACK";
 }

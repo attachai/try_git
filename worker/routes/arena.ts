@@ -4,8 +4,8 @@ import { error, json, readJson } from "../lib/http";
 import { getSessionUser, type SessionUser } from "../lib/session";
 import { thaiDay } from "./quests";
 import {
-  aiTurn, applyAction, ArenaError, EMOTES, ITEMS, makeTeam, mvp, parentLevelFor, rollWeather, startBattle, WEATHER_KINDS,
-  type ItemKind, type WeatherKind,
+  aiTurn, applyAction, ArenaError, EMOTES, ITEMS, makeTeam, mvp, parentLevelFor, rollWeather, startBattle, THEME_KINDS, THEMES,
+  WEATHER_KINDS, type ItemKind, type ThemeKind, type WeatherKind,
   type BattleState, type Rng, type Side,
 } from "../../shared/arena";
 import { addXp } from "../../shared/battle";
@@ -28,6 +28,7 @@ const OPEN_STATUSES = "('WAITING','PICKING','BATTLE')";
 
 const createSchema = z.object({
   difficulty: z.enum(["EASY", "NORMAL", "HARD"]),
+  theme: z.enum(["VOLCANO", "BEACH", "FOREST", "SNOWPEAK", "SPACE", "STADIUM", "RANDOM"] satisfies (ThemeKind | "RANDOM")[]).optional(),
   prize: z.number().int().min(0).max(200),
   autoParent: z.boolean(),
 });
@@ -49,7 +50,7 @@ type Room = {
   status: "WAITING" | "PICKING" | "BATTLE" | "FINISHED" | "CANCELLED";
   parent_team: string; state: string | null; version: number;
   winner: Side | null; reward_points: number; xp_awards: string | null;
-  emotes: string | null; emote_seq: number; weather: WeatherKind | null;
+  emotes: string | null; emote_seq: number; weather: WeatherKind | null; theme: ThemeKind | null;
 };
 type Emote = { seq: number; side: Side; emoji: string; at: number };
 type XpAward = { name: string; gained: number; level: number; levels_gained: number };
@@ -99,6 +100,7 @@ async function view(env: Env, room: Room, side: Side) {
       my_side: side,
       emote_seq: room.emote_seq,
       weather: room.weather ?? "CLEAR",
+      theme: room.theme,
     },
     parent_team: JSON.parse(room.parent_team) as CharacterInfo[],
     state,
@@ -313,15 +315,20 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     const team = [...pool.results].sort(() => rng() - 0.5).slice(0, PARENT_TEAM_SIZE);
     if (team.length === 0) return error(409, "NO_CHARACTERS", "No characters available.");
 
+    const theme = (!parsed.data.theme || parsed.data.theme === "RANDOM"
+      ? THEME_KINDS[Math.floor(rng() * THEME_KINDS.length)]
+      : parsed.data.theme) as ThemeKind;
+    const weather = theme === "SPACE" ? "CLEAR" : rollWeather(rng, undefined, THEMES[theme].weather);
+
     // Retry a few codes in case one is already in use by an open room.
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const code = String(Math.floor(rng() * 10000)).padStart(4, "0");
       const id = crypto.randomUUID();
       try {
         await env.DB.prepare(
-          `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team, weather)
-           VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)`,
-        ).bind(id, code, user.id, parsed.data.difficulty, parsed.data.prize, parsed.data.autoParent ? 1 : 0, JSON.stringify(team), rollWeather(rng)).run();
+          `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team, weather, theme)
+           VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?, ?, ?)`,
+        ).bind(id, code, user.id, parsed.data.difficulty, parsed.data.prize, parsed.data.autoParent ? 1 : 0, JSON.stringify(team), weather, theme).run();
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         if (message.includes("UNIQUE constraint failed")) continue;
@@ -421,7 +428,8 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     const childTeam = makeTeam(ordered);
     if (parsed.data.item) childTeam.item = { kind: parsed.data.item, used: false };
     const weather = room.weather && (WEATHER_KINDS as string[]).includes(room.weather) ? room.weather : "CLEAR";
-    const state = startBattle(childTeam, makeTeam(parentTeam, DIFFICULTY[room.difficulty].scale), weather);
+    const theme = room.theme && (THEME_KINDS as string[]).includes(room.theme) ? room.theme : undefined;
+    const state = startBattle(childTeam, makeTeam(parentTeam, DIFFICULTY[room.difficulty].scale), weather, theme);
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
   }

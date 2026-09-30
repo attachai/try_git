@@ -119,6 +119,25 @@ During playback, the cards show the HP and active monster of that moment, the ba
 
 Simulation with all of this (AI vs AI, random fields): median 15 turns, first mover 57%, about 1.3 field changes per battle.
 
+### Arenas and field events
+
+- **Themes:** the parent picks one when creating a room (or 🎲 random). It's stored in `arena_rooms.theme` (migration 0015) and sets a backdrop, the weather pool, and one house rule:
+  - 🌋 Volcano: every 3 rounds lava hits non-Fire actives for 5%
+  - 🌊 Beach: Water heals 3% at the end of its turn
+  - 🌲 Forest: Grass/Bug +8 evade
+  - 🏔️ Snow peak: a 10% chance a hit freezes for 1 turn
+  - 🌌 Space: +10 evade for all, specials cost ⚡2, the weather stays clear
+  - 🏟️ Stadium: a crit or super-effective hit gets a crowd cheer, ult +10
+- **Animated weather:** rain, storm (with lightning flashes), snow, sand streaks, and a sun glow drawn over the stage. Turned off under reduced motion
+- **Field events:** from round 3, a 20% chance each round, at most 2 per battle. Each one has its own animation:
+  - ☄️ meteor: 10% to a random side
+  - ⚡ lightning: 12% to any WET active, otherwise it misses
+  - 🌈 rainbow: both heal 10%
+  - 🎁 gift: ⚡+2 and ult +30 to the side with less total HP
+- Hazards can knock a monster out, and even end the battle
+
+Simulation per theme (1,000 AI battles each): median 15–16 turns everywhere, about 1.1 field events per battle, first mover 55–58% (Space 60%).
+
 ## Rooms
 
 1. A parent creates a room (`POST /api/arena/rooms`) with a difficulty, a prize (0–200) and optionally "let the system play". The server rolls a random 3-monster parent team and a 4-digit code.
