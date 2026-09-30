@@ -569,7 +569,7 @@ export default function App() {
           </>
         )}
 
-        {showArena && <ArenaParent />}
+        {showArena && <ArenaParent kids={children} />}
 
         {activeChild && !showFamily && !showArena && (
           <>

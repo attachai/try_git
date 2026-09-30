@@ -3,6 +3,7 @@ import { api } from "../../lib/api";
 import { computeStats, typeMultiplier, weakTo } from "../../../shared/battle";
 import { parentLevelFor } from "../../../shared/arena";
 import { TYPE_INFO, TypeBadges } from "../TypeBadge";
+import ArenaHistory from "./ArenaHistory";
 import BattleView from "./BattleView";
 import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
 
@@ -66,6 +67,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
 
   if (!view || view.room.status === "CANCELLED") {
     return (
+      <>
       <section className="panel">
         {back}
         <div className="section-heading"><h2>⚔️ Arena</h2><span>ท้าสู้พ่อแม่!</span></div>
@@ -88,6 +90,8 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
         </form>
         {message && <p className="feedback">{message}</p>}
       </section>
+      <ArenaHistory />
+      </>
     );
   }
 

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { TypeBadges } from "../TypeBadge";
+import ArenaHistory from "./ArenaHistory";
 import BattleView from "./BattleView";
 import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
 
@@ -11,7 +12,9 @@ const DIFFICULTY_HINT: Record<Difficulty, string> = {
   HARD: "สุ่มได้ทุกตัว พลัง ×1.1",
 };
 
-export default function ArenaParent() {
+type Props = { kids: { id: string; display_name: string }[] };
+
+export default function ArenaParent({ kids }: Props) {
   const { view, setView } = useRoom(null);
   const [loaded, setLoaded] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>("NORMAL");
@@ -19,6 +22,7 @@ export default function ArenaParent() {
   const [autoParent, setAutoParent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [historyChildId, setHistoryChildId] = useState("");
 
   useEffect(() => {
     api<RoomView | { room: null }>("/api/arena/rooms/current")
@@ -49,8 +53,24 @@ export default function ArenaParent() {
 
   if (!loaded) return null;
 
+  const historyKid = kids.find((kid) => kid.id === historyChildId) ?? kids[0];
+  const historyPanel = historyKid && (
+    <>
+      {kids.length > 1 && (
+        <label className="child-picker">
+          ดูประวัติของ
+          <select value={historyKid.id} onChange={(e) => setHistoryChildId(e.target.value)}>
+            {kids.map((kid) => <option key={kid.id} value={kid.id}>{kid.display_name}</option>)}
+          </select>
+        </label>
+      )}
+      <ArenaHistory childId={historyKid.id} childName={historyKid.display_name} refreshKey={view?.room.version} />
+    </>
+  );
+
   if (!view || view.room.status === "CANCELLED") {
     return (
+      <>
       <section className="panel">
         <div className="section-heading"><h2>⚔️ สร้างห้อง Arena</h2><span>ให้ลูกมาท้าสู้</span></div>
         <form className="point-form" onSubmit={create}>
@@ -78,6 +98,8 @@ export default function ArenaParent() {
           {message && <p className="feedback">{message}</p>}
         </form>
       </section>
+      {historyPanel}
+      </>
     );
   }
 
@@ -109,7 +131,10 @@ export default function ArenaParent() {
     <>
       <BattleView view={view} onView={setView} />
       {view.room.status === "FINISHED" && (
-        <button className="submit-button earn arena-again" onClick={() => setView(null)}>สร้างห้องใหม่</button>
+        <>
+          <button className="submit-button earn arena-again" onClick={() => setView(null)}>สร้างห้องใหม่</button>
+          {historyPanel}
+        </>
       )}
     </>
   );

@@ -175,6 +175,96 @@ async function saveState(env: Env, room: Room, state: BattleState) {
   return result.meta.changes === 1;
 }
 
+export const HISTORY_LIMIT = 100;
+export const RECENT_SHOWN = 20;
+
+type HistoryRow = {
+  code: string; difficulty: keyof typeof DIFFICULTY; winner: Side; state: string;
+  reward_points: number; finished_at: string; parent_name: string;
+};
+type Monster = { id: string; name: string; image_url: string; type_primary: string; type_secondary: string | null; level?: number };
+
+// Finished rooms for one child, against any parent: totals, streaks, per-difficulty
+// record, the child's most successful monsters, and the latest rooms.
+async function history(env: Env, childId: string) {
+  const rows = await env.DB.prepare(
+    `SELECT r.code, r.difficulty, r.winner, r.state, r.reward_points, r.updated_at AS finished_at, u.display_name AS parent_name
+     FROM arena_rooms r JOIN users u ON u.id = r.parent_user_id
+     WHERE r.child_id = ? AND r.status = 'FINISHED' AND r.state IS NOT NULL
+     ORDER BY r.updated_at DESC LIMIT ?`,
+  ).bind(childId, HISTORY_LIMIT).all<HistoryRow>();
+
+  const games = rows.results.map((row) => ({ ...row, battle: JSON.parse(row.state) as BattleState }));
+  const wins = games.filter((game) => game.winner === "CHILD").length;
+
+  let current = 0;
+  for (const game of games) {
+    if (game.winner !== "CHILD") break;
+    current += 1;
+  }
+  let best = 0;
+  let run = 0;
+  for (const game of [...games].reverse()) {
+    run = game.winner === "CHILD" ? run + 1 : 0;
+    best = Math.max(best, run);
+  }
+
+  const byDifficulty = Object.fromEntries((Object.keys(DIFFICULTY) as (keyof typeof DIFFICULTY)[]).map((level) => {
+    const played = games.filter((game) => game.difficulty === level);
+    return [level, { wins: played.filter((game) => game.winner === "CHILD").length, losses: played.filter((game) => game.winner !== "CHILD").length }];
+  }));
+
+  const monsters = new Map<string, { monster: Monster; battles: number; wins: number; damage: number; mvp: number }>();
+  for (const game of games) {
+    const star = mvp(game.battle);
+    for (const fighter of game.battle.teams.CHILD.fighters) {
+      const entry = monsters.get(fighter.id) ?? {
+        monster: { id: fighter.id, name: fighter.name, image_url: fighter.image_url, type_primary: fighter.type_primary, type_secondary: fighter.type_secondary },
+        battles: 0, wins: 0, damage: 0, mvp: 0,
+      };
+      entry.battles += 1;
+      entry.wins += game.winner === "CHILD" ? 1 : 0;
+      entry.damage += fighter.damageDealt;
+      entry.mvp += star === fighter ? 1 : 0;
+      monsters.set(fighter.id, entry);
+    }
+  }
+  const topMonsters = [...monsters.values()]
+    .sort((a, b) => b.wins - a.wins || b.damage - a.damage)
+    .slice(0, 3);
+
+  const pickTeam = (fighters: BattleState["teams"]["CHILD"]["fighters"]): Monster[] =>
+    fighters.map(({ id, name, image_url, type_primary, type_secondary, level }) => ({ id, name, image_url, type_primary, type_secondary, level }));
+
+  return {
+    summary: {
+      played: games.length,
+      wins,
+      losses: games.length - wins,
+      win_rate: games.length ? Math.round((wins / games.length) * 100) : 0,
+      current_streak: current,
+      best_streak: best,
+    },
+    by_difficulty: byDifficulty,
+    top_monsters: topMonsters,
+    recent: games.slice(0, RECENT_SHOWN).map((game) => {
+      const star = mvp(game.battle);
+      return {
+        code: game.code,
+        difficulty: game.difficulty,
+        winner: game.winner,
+        finished_at: game.finished_at,
+        parent_name: game.parent_name,
+        rounds: game.battle.round,
+        reward_points: game.reward_points,
+        mvp: star ? { name: star.name, damage: star.damageDealt, side: game.winner } : null,
+        child_team: pickTeam(game.battle.teams.CHILD.fighters),
+        parent_team: pickTeam(game.battle.teams.PARENT.fighters),
+      };
+    }),
+  };
+}
+
 export async function arenaRoutes(request: Request, env: Env, pathname: string) {
   const user = await getSessionUser(request, env);
   if (!user) return error(401, "UNAUTHENTICATED", "Please sign in.");
@@ -210,6 +300,18 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
       return json(await view(env, room!, "PARENT"), { status: 201 });
     }
     return error(503, "NO_CODE", "ลองสร้างห้องใหม่อีกครั้ง");
+  }
+
+  if (pathname === "/api/arena/history" && request.method === "GET") {
+    let childId: string | null;
+    if (user.role === "CHILD") {
+      childId = (await childOf(env, user))?.id ?? null;
+    } else {
+      childId = new URL(request.url).searchParams.get("childId");
+      if (childId && !(await childCanJoin(env, user.id, childId))) childId = null;
+    }
+    if (!childId) return error(404, "CHILD_NOT_FOUND", "Child not found.");
+    return json(await history(env, childId));
   }
 
   if (pathname === "/api/arena/rooms/current" && request.method === "GET") {

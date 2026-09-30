@@ -29,7 +29,7 @@ export default {
     } else if (url.pathname === "/api/children" || url.pathname === "/api/child/me" || url.pathname === "/api/families" ||
       url.pathname === "/api/parents" || url.pathname === "/api/children/avatar") {
       response = (await childrenRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
-    } else if (url.pathname === "/api/points" || url.pathname.includes("/history")) {
+    } else if (url.pathname === "/api/points" || /^\/api\/children\/[^/]+\/history$/.test(url.pathname)) {
       response = (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname === "/api/quests" || url.pathname.startsWith("/api/quests/")) {
       response = (await questRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");

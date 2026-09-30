@@ -81,6 +81,17 @@ Every monster on the child's team gets XP when a room finishes: +30 for a win, +
 
 Rewards: the child gets the prize for a win or +10 for a loss, on up to 3 rooms per Thailand-time day. The payout is an `EARN` ledger row with `reference_type = 'ARENA'`, and the unique reference index makes it pay once per room.
 
+## History
+
+`GET /api/arena/history` (child: their own; parent: `?childId=` for a child in one of their families) summarizes the child's last 100 finished rooms against any parent:
+- totals and win rate
+- current and best win streak
+- win-loss per difficulty
+- the top 3 monsters by wins, then damage (battles, wins, total damage, MVP count)
+- the latest 20 rooms with both teams, rounds, MVP and reward
+
+Children see it under the code entry on the Arena screen. Parents see it in the Arena tab, with a picker when they have more than one child.
+
 ## Balance check (simulation, AI vs AI, 2,000 battles each)
 
 | Scenario | Result |

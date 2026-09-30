@@ -355,3 +355,26 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .level-bar small { font-size: 11px; color: #64748b; font-weight: 700; font-variant-numeric: tabular-nums; }
 .xp-awards { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
 .xp-awards strong { color: #7c3aed; }
+.history-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+.history-stats > div { display: grid; justify-items: center; gap: 2px; padding: 10px 4px; border-radius: 14px; background: #f8fafc; text-align: center; }
+.history-stats strong { font-size: 20px; }
+.history-stats small { font-size: 11px; color: #64748b; }
+.history-stats .hot { background: linear-gradient(135deg, #fff7ed, #ffedd5); }
+.history-difficulty { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 10px; font-size: 13px; color: #475569; }
+.history-top { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.history-top > div { position: relative; display: grid; justify-items: center; gap: 3px; padding: 10px 6px; border-radius: 16px; background: #f8fafc; text-align: center; }
+.history-top img { width: 60px; height: 60px; object-fit: contain; }
+.history-top small { font-size: 11px; color: #475569; }
+.history-rank { position: absolute; top: 4px; left: 6px; font-size: 18px; }
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.history-list li { display: grid; gap: 6px; padding: 10px 12px; border-radius: 14px; border-left: 4px solid #cbd5e1; background: #f8fafc; }
+.history-list li.win { border-left-color: #22c55e; }
+.history-list li.loss { border-left-color: #f59e0b; }
+.history-row-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.history-row-top small { margin-left: auto; color: #64748b; }
+.history-chip { padding: 2px 8px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 800; }
+.history-row-teams { display: flex; align-items: center; gap: 8px; }
+.history-team { display: inline-flex; gap: 2px; }
+.history-team img { width: 34px; height: 34px; object-fit: contain; }
+.history-vs { font-size: 11px; font-weight: 900; color: #94a3b8; }
+@media (max-width: 420px) { .history-stats { grid-template-columns: repeat(2, 1fr); } }
