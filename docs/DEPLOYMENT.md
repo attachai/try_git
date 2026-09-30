@@ -2,8 +2,10 @@
 
 ## Install
 ```bash
-npm install
+npm ci --legacy-peer-deps
 ```
+
+Dependency versions are pinned in `package-lock.json`, and CI and the deploy workflow install with `npm ci`, so every run builds with the same packages. To add or upgrade a package, run `npm install <package> --legacy-peer-deps` and commit the updated lockfile.
 
 ## Create D1 database
 ```bash
