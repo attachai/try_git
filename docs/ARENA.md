@@ -95,6 +95,30 @@ During playback, the cards show the HP and active monster of that moment, the ba
 - **Ultimate cut-in:** a type-colored diagonal band with the monster's art and the move name
 - **Emoji reactions:** 8 emojis, sent with `POST /api/arena/rooms/:code/emote`. They're stored in `arena_rooms.emotes` with their own `emote_seq` (migration 0013), so they never bump the battle `version`. Each side can send one per second, and the last 10 are kept. Polling re-renders when either `version` or `emote_seq` changes
 
+### Strategy
+
+- **Field:** rolled when the room is created (`arena_rooms.weather`) and shown while picking. The attacker's primary type gets ×1.2 when boosted or ×0.8 when weakened. It re-rolls to a different field every 4 rounds, with a `weather` event
+  - 🌤️ Clear: no effect
+  - ☀️ Sun: Fire+, Water−
+  - 🌧️ Rain: Water+, Fire−
+  - ⛈️ Storm: Electric/Flying+
+  - ❄️ Snow: Ice+, Grass−
+  - 🏜️ Sand: Rock/Ground/Steel+, Electric−
+- **Combos:** a Water hit leaves 💧 WET and a Grass hit leaves 🌿 GRASSY for 2 turns. Then:
+  - WET + Electric = ⚡💧 ช็อตไฟฟ้า ×1.3
+  - FREEZE + Rock/Fighting/Steel = ❄️💥 แตกกระจาย, a guaranteed crit
+  - GRASSY + Fire = 🌿🔥 ไฟลาม, ×1.1 plus burn
+  - BURN + Flying = 🔥🌪️ พายุไฟ ×1.3
+  - The mark is consumed, except burn. The UI hints when a combo is ready
+- **Switch:** `{ action: "SWITCH", target }` takes the turn to bring in a living bench monster, and works even while paralyzed. The AI switches away from a ×1.5 threat 30% of the time
+- **Items:** the child may carry one item, picked with the team (`item` on `POST .../team`):
+  - 🧪 potion: heal 30%, 60 points
+  - 🔋 ether: ⚡+2, 50 points
+  - ✨ cleanse: clear bad statuses + heal 10%, 40 points
+  - Using it takes the turn. It's paid only when used, once per room (`ARENA_ITEM` in the unique ledger index), and the balance is checked first
+
+Simulation with all of this (AI vs AI, random fields): median 15 turns, first mover 57%, about 1.3 field changes per battle.
+
 ## Rooms
 
 1. A parent creates a room (`POST /api/arena/rooms`) with a difficulty, a prize (0–200) and optionally "let the system play". The server rolls a random 3-monster parent team and a 4-digit code.

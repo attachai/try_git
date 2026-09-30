@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { STATUS_INFO, type BattleEvent, type BattleState, type Side } from "../../../shared/arena";
+import { ITEMS, STATUS_INFO, WEATHER, type BattleEvent, type BattleState, type Side } from "../../../shared/arena";
 import { TYPE_ICON } from "../../../shared/types";
 import { buzz, sfx } from "./sound";
 
@@ -26,6 +26,7 @@ const FLOAT_MS = 1200;
 const DURATION: Record<BattleEvent["kind"], number> = {
   attack: 350, special: 750, ultimate: 1400, hit: 650, miss: 550, heal: 550, status: 450, buff: 450,
   tick: 500, guard: 450, paralyzed: 450, faint: 800, switch: 550, win: 1000,
+  weather: 1300, combo: 700, item: 600, recall: 400,
 };
 
 function snapshot(state: BattleState): Display {
@@ -156,6 +157,29 @@ export function usePlayback(state: BattleState, me: Side) {
           sfx.status();
           setFx((fx) => ({ ...fx, sprite: { [event.side]: "hurt-soft" } }));
           addFloat(event.side, "⚡ ชา! ขยับไม่ได้", "weak");
+          break;
+        case "weather": {
+          const field = WEATHER[event.weather ?? "CLEAR"];
+          sfx.special();
+          setFx((fx) => ({ ...fx, banner: { text: "🌦️ สนามเปลี่ยน! " + field.icon + " " + field.label, type: "weather" }, screen: "flash flash-normal" }));
+          say(field.icon + " " + field.label + "!", "cool");
+          break;
+        }
+        case "combo":
+          sfx.crit();
+          buzz([30, 30, 30]);
+          setFx((fx) => ({ ...fx, sprite: { [event.side]: "hurt" }, screen: "shake" }));
+          addFloat(event.side, "🔗 " + event.combo, "crit");
+          say("🔗 คอมโบ! " + event.combo + "!", "crit");
+          break;
+        case "item":
+          sfx.heal();
+          setFx((fx) => ({ ...fx, sprite: { [event.side]: "buff" } }));
+          if (event.item) addFloat(event.side, ITEMS[event.item].icon + " " + ITEMS[event.item].label, "buff");
+          break;
+        case "recall":
+          sfx.miss();
+          setFx((fx) => ({ ...fx, sprite: { [event.side]: "recall" } }));
           break;
         case "faint":
           sfx.faint();

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
-import type { BattleState, Side } from "../../../shared/arena";
+import type { BattleState, Side, WeatherKind } from "../../../shared/arena";
 
 export type ArenaCharacter = { id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary: string | null };
 export type RoomView = {
@@ -17,6 +17,7 @@ export type RoomView = {
     child_name: string | null;
     my_side: Side;
     emote_seq: number;
+    weather: WeatherKind;
   };
   parent_team: ArenaCharacter[];
   state: BattleState | null;
