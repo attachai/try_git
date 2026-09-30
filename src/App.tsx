@@ -101,6 +101,8 @@ export default function App() {
   const [parentName, setParentName] = useState("");
   const [parentRelation, setParentRelation] = useState<ParentRelation>("MOTHER");
   const [parentPin, setParentPin] = useState("");
+  const [editingFamily, setEditingFamily] = useState<{ id: string; name: string; code: string } | null>(null);
+  const [renaming, setRenaming] = useState<{ familyId: string; userId: string; name: string } | null>(null);
   const [message, setMessage] = useState("");
   const [childTab, setChildTab] = useState<ChildTab>("home");
   const [parentTab, setParentTab] = useState<ParentTab>("home");
@@ -289,6 +291,43 @@ export default function App() {
     }).catch(() => undefined);
   }
 
+  function submitEditFamily(event: FormEvent) {
+    event.preventDefault();
+    if (!editingFamily) return;
+    const { id, name, code } = editingFamily;
+    runFamilyAction(async () => {
+      const saved = await api<{ family: Family }>("/api/families/update", {
+        method: "POST",
+        body: JSON.stringify({ familyId: id, name, familyCode: code }),
+      });
+      setEditingFamily(null);
+      await refreshFamilies();
+      return "บันทึกครอบครัว " + saved.family.name + " แล้ว · Family Code ใหม่: " + saved.family.family_code;
+    }).catch(() => undefined);
+  }
+
+  function submitRename(event: FormEvent) {
+    event.preventDefault();
+    if (!renaming) return;
+    const { familyId, userId, name } = renaming;
+    runFamilyAction(async () => {
+      await api("/api/members/rename", { method: "POST", body: JSON.stringify({ familyId, userId, displayName: name }) });
+      setRenaming(null);
+      await refreshFamilies();
+      if (userId === user?.id) setUser((current) => (current ? { ...current, display_name: name.trim() } : current));
+      return "เปลี่ยนชื่อเป็น " + name.trim() + " แล้ว";
+    }).catch(() => undefined);
+  }
+
+  function leaveFamily(family: Family) {
+    if (!window.confirm("ออกจากครอบครัว " + family.name + "? คุณจะไม่เห็นเด็กในครอบครัวนี้อีก")) return;
+    runFamilyAction(async () => {
+      await api("/api/families/leave", { method: "POST", body: JSON.stringify({ familyId: family.id }) });
+      await refreshFamilies();
+      return "ออกจากครอบครัว " + family.name + " แล้ว";
+    }).catch(() => undefined);
+  }
+
   function changeAvatar(member: FamilyMember, file: File | undefined) {
     const childId = member.child_id;
     if (!file || !childId) return;
@@ -453,14 +492,45 @@ export default function App() {
                         <h3>{family.name}</h3>
                         <span className="family-code">{family.family_code ?? "ไม่มี Family Code"}</span>
                       </div>
+                      {editingFamily?.id === family.id ? (
+                        <form className="point-form family-edit" onSubmit={submitEditFamily}>
+                          <label>
+                            ชื่อครอบครัว
+                            <input className="reason-input" value={editingFamily.name} onChange={(e) => setEditingFamily({ ...editingFamily, name: e.target.value })} minLength={2} maxLength={100} required />
+                          </label>
+                          <label>
+                            Family Code (ใช้ตอนเข้าสู่ระบบ)
+                            <input className="reason-input" value={editingFamily.code} onChange={(e) => setEditingFamily({ ...editingFamily, code: e.target.value.toUpperCase() })} autoCapitalize="characters" minLength={4} maxLength={20} required />
+                          </label>
+                          <small className="muted">เปลี่ยน Family Code แล้ว ทุกคนในครอบครัวต้องใช้รหัสใหม่ตอนเข้าสู่ระบบครั้งถัดไป</small>
+                          <div className="family-edit-actions">
+                            <button disabled={busy} className="submit-button earn" type="submit">บันทึก</button>
+                            <button type="button" className="link-button" onClick={() => setEditingFamily(null)}>ยกเลิก</button>
+                          </div>
+                        </form>
+                      ) : (
+                        <button className="link-button" onClick={() => setEditingFamily({ id: family.id, name: family.name, code: family.family_code ?? "" })}>✏️ แก้ชื่อ / Family Code</button>
+                      )}
                       <div className="member-list">
                         {(family.members ?? []).map((member) => (
                           <div className="member-row" key={member.user_id}>
                             <ProfileAvatar profile={member} size="small" />
-                            <div>
-                              <strong>{member.display_name}{member.user_id === user.id ? " (คุณ)" : ""}</strong>
-                              <small>{RELATION_LABEL[member.relation]}{member.has_pin ? "" : " · ยังไม่ได้ตั้ง PIN"}</small>
-                            </div>
+                            {renaming?.userId === member.user_id && renaming.familyId === family.id ? (
+                              <form className="member-rename" onSubmit={submitRename}>
+                                <input className="reason-input" value={renaming.name} onChange={(e) => setRenaming({ ...renaming, name: e.target.value })} maxLength={80} required autoFocus />
+                                <button disabled={busy} className="quest-button" type="submit">บันทึก</button>
+                                <button type="button" className="link-button" onClick={() => setRenaming(null)}>ยกเลิก</button>
+                              </form>
+                            ) : (
+                              <div>
+                                <strong>{member.display_name}{member.user_id === user.id ? " (คุณ)" : ""}</strong>
+                                <small>
+                                  {RELATION_LABEL[member.relation]}{member.has_pin ? "" : " · ยังไม่ได้ตั้ง PIN"}
+                                  {" · "}
+                                  <button className="link-button inline" onClick={() => setRenaming({ familyId: family.id, userId: member.user_id, name: member.display_name })}>เปลี่ยนชื่อ</button>
+                                </small>
+                              </div>
+                            )}
                             {member.child_id && (
                               <label className="avatar-upload">
                                 เปลี่ยนรูป
@@ -475,6 +545,9 @@ export default function App() {
                           </div>
                         ))}
                       </div>
+                      {(family.members ?? []).filter((member) => member.relation !== "CHILD").length > 1 && (
+                        <button className="link-button family-leave" onClick={() => leaveFamily(family)}>ออกจากครอบครัวนี้</button>
+                      )}
                     </article>
                   ))}
                 </div>
