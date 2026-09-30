@@ -4,7 +4,7 @@ import { error, json, readJson } from "../lib/http";
 import { getSessionUser, type SessionUser } from "../lib/session";
 import { thaiDay } from "./quests";
 import {
-  applyAction, ArenaError, chooseAiAction, makeTeam, mvp, startBattle,
+  applyAction, ArenaError, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle,
   type BattleState, type Rng, type Side,
 } from "../../shared/arena";
 import { addXp } from "../../shared/battle";
@@ -265,7 +265,9 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     if (owned.results.length !== ids.length) return error(400, "INVALID_TEAM", "เลือกได้เฉพาะตัวใน Collection");
     const ordered = ids.map((id) => owned.results.find((row) => row.owned_id === id)!);
 
-    const state = startBattle(makeTeam(ordered), makeTeam(JSON.parse(room.parent_team), DIFFICULTY[room.difficulty].scale));
+    const parentLevel = parentLevelFor(ordered.map((monster) => monster.level));
+    const parentTeam = (JSON.parse(room.parent_team) as CharacterInfo[]).map((monster) => ({ ...monster, level: parentLevel }));
+    const state = startBattle(makeTeam(ordered), makeTeam(parentTeam, DIFFICULTY[room.difficulty].scale));
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
   }

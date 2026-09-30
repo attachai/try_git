@@ -117,6 +117,13 @@ export function makeTeam(characters: CharacterInfo[], scale = 1): Team {
   return { fighters, active: 0, energy: 0 };
 }
 
+// The parent team plays at the child team's average level, rounded down,
+// so leveling up still gives the child a small edge.
+export function parentLevelFor(childLevels: number[]) {
+  if (childLevels.length === 0) return 1;
+  return Math.max(1, Math.floor(childLevels.reduce((sum, level) => sum + level, 0) / childLevels.length));
+}
+
 export function startBattle(child: Team, parent: Team): BattleState {
   const state: BattleState = { turn: "CHILD", round: 1, teams: { CHILD: child, PARENT: parent }, log: [], winner: null };
   push(state, "⚔️ เริ่มการต่อสู้! " + child.fighters[0].name + " ปะทะ " + parent.fighters[0].name);

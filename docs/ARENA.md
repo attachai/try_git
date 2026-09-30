@@ -64,6 +64,8 @@ Statuses tick (burn/poison) and count down at the end of their owner's turn. Whe
 
 Each owned monster (`child_characters.level`, `xp`) has an arena level from 1 to 10. Each level above 1 adds 3% HP/ATK/DEF, so a Lv.10 COMMON (+27%) stays just below an EPIC (+30%) and evolving is still worth it. Evolving carries the level and XP over to the new form.
 
+The parent team plays at the child team's average level, rounded down (`parentLevelFor`). It's set when the child starts the battle, and the picker shows it, so fights stay close while leveling up still gives the child a small edge.
+
 Every monster on the child's team gets XP when a room finishes: +30 for a win, +10 for a loss, and +20 more for the winning side's MVP. XP counts for up to 5 rooms per child per Thailand-time day. Going from level L to L+1 takes 50 × L XP (50, 100, …, 450; 2,250 total to reach Lv.10). `arena_rooms.xp_day` is claimed before paying, so a room hands out XP once, and `xp_awards` holds the summary shown on the result screen.
 
 ## Rooms
