@@ -64,6 +64,7 @@ export const sfx = {
   heartbeat: () => [0, 0.22].forEach((delay) => tone(70, 0.12, { type: "sine", gain: 0.12, delay })),
   count: () => tone(660, 0.1, { type: "square", gain: 0.05 }),
   fight: () => { tone(523, 0.12, { gain: 0.06 }); tone(1046, 0.3, { gain: 0.06, delay: 0.1 }); },
+  fanfare: () => [523, 659, 784, 659, 784, 1046].forEach((f, i) => tone(f, i === 5 ? 0.45 : 0.14, { type: "triangle", gain: 0.06, delay: 0.9 + i * 0.13 })),
   lose: () => [392, 330, 262].forEach((f, i) => tone(f, 0.22, { type: "triangle", gain: 0.05, delay: i * 0.15 })),
 };
 

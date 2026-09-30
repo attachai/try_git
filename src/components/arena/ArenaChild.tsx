@@ -3,7 +3,9 @@ import { api } from "../../lib/api";
 import { computeStats, typeMultiplier, weakTo } from "../../../shared/battle";
 import { ITEMS, parentLevelFor, THEMES, WEATHER, weatherMultiplier, type ItemKind } from "../../../shared/arena";
 import { TYPE_INFO, TypeBadges } from "../TypeBadge";
+import { TOURNAMENT_STAGES } from "../../../shared/progression";
 import ArenaHistory from "./ArenaHistory";
+import ArenaProfile from "./ArenaProfile";
 import BattleView from "./BattleView";
 import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
 
@@ -93,6 +95,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
         </form>
         {message && <p className="feedback">{message}</p>}
       </section>
+      <ArenaProfile />
       <ArenaHistory />
       </>
     );
@@ -100,21 +103,31 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
 
   if (view.room.status === "PICKING") {
     const foes = view.parent_team;
+    const tournament = view.room.mode === "TOURNAMENT";
     return (
       <>
         <section className="panel">
           {back}
-          <div className="section-heading"><h2>ทีมของ {view.room.parent_name}</h2><span>{DIFFICULTY_LABEL[view.room.difficulty]} · ชนะได้ ⭐ {view.room.prize}</span></div>
-          <div className="arena-team-preview">
-            {foes.map((foe) => (
-              <div key={foe.id}>
-                <img src={foe.image_url} alt={foe.name} />
-                <strong>{foe.name}</strong>
-                <TypeBadges primary={foe.type_primary} secondary={foe.type_secondary} />
-                <small>แพ้ทาง {weakTo(foe).map((type) => TYPE_INFO[type]?.icon).join("")}</small>
-              </div>
-            ))}
+          <div className="section-heading">
+            <h2>{tournament ? "🏟️ ทัวร์นาเมนต์ 3 รอบ" : "ทีมของ " + view.room.parent_name}</h2>
+            <span>{tournament ? "แชมป์ได้" : DIFFICULTY_LABEL[view.room.difficulty] + " · ชนะได้"} ⭐ {view.room.prize}</span>
           </div>
+          {tournament && <p className="muted">ทีมเดียวสู้ครบ 3 รอบ ฟื้น HP 60% ระหว่างรอบ หลอดไม้ตายสะสมต่อได้ · ศัตรูเก่งขึ้นทุกรอบ</p>}
+          {(view.stage_teams ?? [foes]).map((team, round) => (
+            <div key={round}>
+              {tournament && <p className="arena-label">{TOURNAMENT_STAGES[round].icon} {TOURNAMENT_STAGES[round].label}</p>}
+              <div className="arena-team-preview">
+                {team.map((foe) => (
+                  <div key={foe.id}>
+                    <img src={foe.image_url} alt={foe.name} />
+                    <strong>{foe.name}</strong>
+                    <TypeBadges primary={foe.type_primary} secondary={foe.type_secondary} />
+                    <small>แพ้ทาง {weakTo(foe).map((type) => TYPE_INFO[type]?.icon).join("")}</small>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
 
         <section className="panel">
@@ -165,7 +178,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
           )}
           {picked.length > 0 && (
             <p className="muted">
-              ทีม {view.room.parent_name} จะเป็น <span className="level-chip">Lv.{parentLevelFor(picked.map((id) => collection.find((monster) => monster.child_character_id === id)?.level ?? 1))}</span> ตามเลเวลเฉลี่ยทีมคุณ
+              {tournament ? "ศัตรูรอบแรก" : "ทีม " + view.room.parent_name} จะเป็น <span className="level-chip">Lv.{parentLevelFor(picked.map((id) => collection.find((monster) => monster.child_character_id === id)?.level ?? 1))}</span> ตามเลเวลเฉลี่ยทีมคุณ{tournament ? " (รอบต่อไป +1 และ +2)" : ""}
               {picked.length < TEAM_MAX ? " · ลงน้อยกว่า 3 ตัว ได้ HP +20% ทุกตัว" : ""}
             </p>
           )}
@@ -191,9 +204,12 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
   return (
     <>
       {back}
-      <BattleView view={view} onView={setView} />
+      <BattleView key={view.room.code + ":" + view.room.stage} view={view} onView={setView} />
       {view.room.status === "FINISHED" && (
-        <button className="submit-button earn arena-again" onClick={() => { setView(null); setPicked([]); setCode(""); }}>เล่นห้องใหม่</button>
+        <>
+          <button className="submit-button earn arena-again" onClick={() => { setView(null); setPicked([]); setCode(""); }}>เล่นห้องใหม่</button>
+          <ArenaProfile refreshKey={view.room.version} />
+        </>
       )}
     </>
   );

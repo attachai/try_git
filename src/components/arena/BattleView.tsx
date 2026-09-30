@@ -10,7 +10,8 @@ import {
 import { typeMultiplier } from "../../../shared/battle";
 import { TypeBadges } from "../TypeBadge";
 import { TYPE_ICON } from "../../../shared/types";
-import type { RoomView } from "./useRoom";
+import { TOURNAMENT_STAGES } from "../../../shared/progression";
+import type { RoomResults, RoomView } from "./useRoom";
 
 const LOG_SHOWN = 6;
 const DANGER_PERCENT = 25;
@@ -19,8 +20,32 @@ const EMOTE_FLOAT_MS = 2200;
 const INTRO: { text: string; ms: number }[] = [
   { text: "VS", ms: 1400 }, { text: "3", ms: 600 }, { text: "2", ms: 600 }, { text: "1", ms: 600 }, { text: "FIGHT!", ms: 700 },
 ];
-const introKey = (code: string) => "frg.arenaIntro." + code;
+const introKey = (code: string, stage: number) => "frg.arenaIntro." + code + (stage > 1 ? "." + stage : "");
 const SIDE_LABEL: Record<Side, string> = { CHILD: "ลูก", PARENT: "ผู้ปกครอง" };
+
+function Results({ results }: { results: RoomResults }) {
+  const { rp } = results;
+  return (
+    <div className="arena-results">
+      {rp.limited ? (
+        <span className="muted">🎖️ วันนี้นับแรงก์ครบ 5 ห้องแล้ว</span>
+      ) : (
+        <span className={"arena-rp" + (rp.delta > 0 ? " up" : rp.delta < 0 ? " down" : "")}>
+          🎖️ แรงก์ {rp.delta === 0 ? "คงเดิม" : (rp.delta > 0 ? "+" : "") + rp.delta + " RP"} ({rp.after} RP){rp.delta === 0 && rp.before > 0 ? " · กันตกแรงก์ 🛡️" : ""}
+        </span>
+      )}
+      {results.rank_ups.map((rank) => (
+        <strong key={rank.key} className="arena-rank-up">🎉 ขึ้นแรงก์ {rank.icon} {rank.label}!{rank.bonus ? " +" + rank.bonus + " แต้ม" : ""}</strong>
+      ))}
+      {results.achievements.map((entry) => (
+        <span key={entry.code} className="arena-unlock">🏅 ปลดล็อก {entry.icon} {entry.label}{entry.points ? " +" + entry.points : ""}</span>
+      ))}
+      {results.quests.map((quest) => (
+        <span key={quest.code} className="arena-unlock quest">📋 ภารกิจสำเร็จ: {quest.label} +{quest.points}</span>
+      ))}
+    </div>
+  );
+}
 
 function specialText(fighter: Fighter) {
   const special = SPECIALS[fighter.type_primary] ?? SPECIALS.Normal;
@@ -108,7 +133,7 @@ export default function BattleView({ view, onView }: Props) {
   const [muted, setMutedState] = useState(isMuted);
   const [intro, setIntro] = useState(() => {
     if (state.round !== 1 || (state.eventSeq ?? 0) > 0) return -1;
-    try { return sessionStorage.getItem(introKey(view.room.code)) ? -1 : 0; } catch { return 0; }
+    try { return sessionStorage.getItem(introKey(view.room.code, view.room.stage)) ? -1 : 0; } catch { return 0; }
   });
   const canAct = myTurn && !playing && intro < 0;
   const finished = Boolean(state.winner) && !playing;
@@ -126,7 +151,7 @@ export default function BattleView({ view, onView }: Props) {
   useEffect(() => {
     if (intro < 0) return;
     if (intro >= INTRO.length) {
-      try { sessionStorage.setItem(introKey(view.room.code), "1"); } catch { /* shows again next time */ }
+      try { sessionStorage.setItem(introKey(view.room.code, view.room.stage), "1"); } catch { /* shows again next time */ }
       setIntro(-1);
       return;
     }
@@ -188,15 +213,45 @@ export default function BattleView({ view, onView }: Props) {
   }
 
   const won = state.winner === me;
+  const tournament = view.room.mode === "TOURNAMENT";
+  const stage = TOURNAMENT_STAGES[view.room.stage - 1];
+  const nextStage = TOURNAMENT_STAGES[view.room.stage];
+  // A won tournament round: the room stays open until the child moves on.
+  const roundWon = tournament && state.winner === "CHILD" && view.room.status === "BATTLE";
+  const celebrate = finished && Boolean(view.results && (view.results.rank_ups.length || view.results.achievements.length));
+  useEffect(() => { if (celebrate) sfx.fanfare(); }, [celebrate]);
+
+  async function nextRound() {
+    if (busy) return;
+    try {
+      setBusy(true);
+      setMessage("");
+      onView(await api<RoomView>("/api/arena/rooms/" + view.room.code + "/next", { method: "POST", body: "{}" }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ไปรอบต่อไปไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <section className="panel arena-battle">
       <div className="section-heading">
-        <h2>⚔️ รอบ {state.round}</h2>
+        <h2>⚔️ {tournament ? "ยก" : "รอบ"} {state.round}</h2>
         <span className="arena-heading-right">
           <span className={canAct ? "arena-your-turn" : ""}>{playing || intro >= 0 ? "⚔️ ..." : state.winner ? "จบการต่อสู้" : state.turn === me ? "ตาของคุณ!" : "ตาของ" + SIDE_LABEL[state.turn]}</span>
           <button className="arena-sound" onClick={toggleSound} aria-label={muted ? "เปิดเสียง" : "ปิดเสียง"}>{muted ? "🔇" : "🔊"}</button>
         </span>
       </div>
+
+      {tournament && stage && (
+        <div className="arena-stage-track" aria-label={"ทัวร์นาเมนต์ รอบที่ " + view.room.stage + " จาก " + TOURNAMENT_STAGES.length}>
+          {TOURNAMENT_STAGES.map((entry, index) => (
+            <span key={entry.label} className={index + 1 < view.room.stage || (roundWon && index + 1 === view.room.stage) ? "cleared" : index + 1 === view.room.stage ? "current" : ""}>
+              {entry.icon} {entry.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className={"arena-field field-" + (state.weather ?? "CLEAR").toLowerCase()}>
         <span>{theme ? theme.icon + " " + theme.label + " · " : ""}{field.icon} {field.label}</span>
@@ -229,6 +284,7 @@ export default function BattleView({ view, onView }: Props) {
               <div className="arena-intro-vs">
                 <div className="intro-team foe">{state.teams[foe].fighters.map((f, i) => <img key={i} src={f.image_url} alt={f.name} />)}</div>
                 <strong>VS</strong>
+                {tournament && stage && <small className="arena-intro-stage">🏟️ {stage.label} ({view.room.stage}/{TOURNAMENT_STAGES.length})</small>}
                 <div className="intro-team mine">{state.teams[me].fighters.map((f, i) => <img key={i} src={f.image_url} alt={f.name} />)}</div>
               </div>
             ) : (
@@ -270,9 +326,23 @@ export default function BattleView({ view, onView }: Props) {
 
       {state.winner && !finished ? (
         <p className="muted arena-waiting">⚔️ ...</p>
+      ) : roundWon ? (
+        <div className="arena-result win">
+          <strong>🏆 ชนะ{stage?.label}!</strong>
+          <span>ต่อไป: {nextStage?.icon} {nextStage?.label} · ทีมฟื้น HP 60% · หลอดไม้ตายเก็บไว้</span>
+          {me === "CHILD" ? (
+            <button className="submit-button earn" disabled={busy} onClick={nextRound}>➡️ ไป{nextStage?.label}!</button>
+          ) : (
+            <span className="muted">รอ{view.room.child_name ?? "ลูก"}กดไปรอบต่อไป...</span>
+          )}
+        </div>
       ) : state.winner ? (
         <div className={"arena-result" + (won ? " win" : "")}>
-          <strong>{won ? "🏆 ชนะแล้ว!" : me === "CHILD" ? "💪 เกือบแล้ว! ลองใหม่นะ" : "🏆 ผู้ปกครองชนะ"}</strong>
+          <strong>
+            {tournament
+              ? state.winner === "CHILD" ? "👑 แชมป์ทัวร์นาเมนต์!" : "💪 ตกรอบ" + (stage?.label ?? "") + (me === "CHILD" ? " เก่งมาก!" : "")
+              : won ? "🏆 ชนะแล้ว!" : me === "CHILD" ? "💪 เกือบแล้ว! ลองใหม่นะ" : "🏆 ผู้ปกครองชนะ"}
+          </strong>
           {view.mvp && <span>🏅 MVP: {view.mvp.name} ({view.mvp.damage} ดาเมจ)</span>}
           {me === "CHILD" && view.xp_awards && view.xp_awards.length > 0 && (
             <ul className="xp-awards">
@@ -288,6 +358,7 @@ export default function BattleView({ view, onView }: Props) {
           {me === "CHILD" && (
             <span>{view.room.reward_points > 0 ? "ได้ ⭐ +" + view.room.reward_points + " คะแนน" : "วันนี้รับรางวัล Arena ครบแล้ว"}</span>
           )}
+          {view.results && <Results results={view.results} />}
         </div>
       ) : autoPlays ? (
         <p className="muted">ระบบกำลังเล่นแทนคุณ ดูการต่อสู้ได้เลย</p>

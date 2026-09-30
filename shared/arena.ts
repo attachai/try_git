@@ -70,7 +70,17 @@ export type BattleState = {
   weatherUntil?: number; // round at which the field changes next
   theme?: ThemeKind;
   fieldEvents?: number; // random field events so far
+  // Per-side counts for quests and achievements, and the move that decided the game.
+  tally?: Record<Side, Tally>;
+  finisher?: Action;
 };
+export type Tally = { ults: number; combos: number; crits: number; supers: number; switches: number; items: number };
+export const emptyTally = (): Tally => ({ ults: 0, combos: 0, crits: 0, supers: 0, switches: 0, items: 0 });
+export const tallyOf = (state: BattleState, side: Side): Tally => state.tally?.[side] ?? emptyTally();
+function count(state: BattleState, side: Side, key: keyof Tally) {
+  if (!state.tally) return; // battles saved before tallies existed
+  state.tally[side][key] += 1;
+}
 export type Rng = () => number;
 
 export const ENERGY_MAX = 5;
@@ -269,9 +279,32 @@ export function startBattle(child: Team, parent: Team, weather: WeatherKind = "C
   const state: BattleState = {
     turn: "CHILD", round: 1, teams: { CHILD: child, PARENT: parent }, log: [], winner: null,
     weather: space ? "CLEAR" : weather, weatherUntil: space ? undefined : 1 + WEATHER_ROUNDS,
-    theme, fieldEvents: 0,
+    theme, fieldEvents: 0, tally: { CHILD: emptyTally(), PARENT: emptyTally() },
   };
   push(state, "⚔️ เริ่มการต่อสู้! " + child.fighters[0].name + " ปะทะ " + parent.fighters[0].name);
+  return state;
+}
+
+// Tournaments: the child's team carries into the next round, healed a little.
+export const TOURNAMENT_HEAL = 0.6;
+
+export function carryOver(team: Team): Team {
+  const next = structuredClone(team);
+  for (const fighter of next.fighters) {
+    fighter.hp = Math.min(fighter.stats.hp, fighter.hp + Math.round(fighter.stats.hp * TOURNAMENT_HEAL));
+    fighter.statuses = [];
+    fighter.guard = false;
+  }
+  next.active = 0;
+  next.energy = 0;
+  return next;
+}
+
+// A fresh battle against the next opponent. The ultimate gauge, the carried item,
+// damage dealt, and the tallies all keep counting across the tournament.
+export function startNextStage(previous: BattleState, parent: Team, weather: WeatherKind = "CLEAR", theme?: ThemeKind): BattleState {
+  const state = startBattle(carryOver(previous.teams.CHILD), parent, weather, theme);
+  if (previous.tally) state.tally = structuredClone(previous.tally);
   return state;
 }
 
@@ -378,6 +411,10 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, 
   state.teams[other(side)].energy = Math.min(ENERGY_MAX, state.teams[other(side)].energy + 1);
   if (!ultimate) gainUlt(state.teams[side], ULT_ON_HIT);
   gainUlt(state.teams[other(side)], ULT_ON_HURT);
+  if (ultimate) count(state, side, "ults");
+  if (combo) count(state, side, "combos");
+  if (crit) count(state, side, "crits");
+  if (multiplier >= 1.5) count(state, side, "supers");
   const cheer = state.theme === "STADIUM" && (crit || multiplier >= 1.5);
   if (cheer) gainUlt(state.teams[side], CHEER_ULT);
 
@@ -572,12 +609,14 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
     team.active = target!;
     push(next, "🔄 " + who + " เรียก " + fighter.name + " กลับ แล้วส่ง " + team.fighters[target!].name + " ออกมา!");
     emit(next, { kind: "switch", side, index: target! });
+    count(next, side, "switches");
   } else if (action === "ITEM") {
     const item = team.item!;
     item.used = true;
     const info = ITEMS[item.kind];
     push(next, fighter.name + " ใช้ " + info.icon + " " + info.label + "!");
     emit(next, { kind: "item", side, index: team.active, item: item.kind });
+    count(next, side, "items");
     if (item.kind === "ETHER") team.energy = Math.min(ENERGY_MAX, team.energy + 2);
     if (item.kind === "CLEANSE") fighter.statuses = fighter.statuses.filter((status) => !BAD_STATUSES.includes(status.kind));
     const healRate = item.kind === "POTION" ? 0.3 : item.kind === "CLEANSE" ? 0.1 : 0;
@@ -611,6 +650,7 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   endOfTurn(next, side);
   replaceFainted(next);
   if (next.winner) {
+    next.finisher = action;
     push(next, next.winner === "CHILD" ? "🏆 ลูกชนะ!" : "🏆 ผู้ปกครองชนะ!");
     emit(next, { kind: "win", side: next.winner, index: next.teams[next.winner].active });
     return next;

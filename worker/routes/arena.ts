@@ -4,11 +4,15 @@ import { error, json, readJson } from "../lib/http";
 import { getSessionUser, type SessionUser } from "../lib/session";
 import { thaiDay } from "./quests";
 import {
-  aiTurn, applyAction, ArenaError, EMOTES, ITEMS, makeTeam, mvp, parentLevelFor, rollWeather, startBattle, THEME_KINDS, THEMES,
-  WEATHER_KINDS, type ItemKind, type ThemeKind, type WeatherKind,
+  aiTurn, applyAction, ArenaError, EMOTES, ITEMS, makeTeam, mvp, parentLevelFor, rollWeather, startBattle, startNextStage, tallyOf,
+  THEME_KINDS, THEMES, WEATHER_KINDS, type ItemKind, type ThemeKind, type WeatherKind,
   type BattleState, type Rng, type Side,
 } from "../../shared/arena";
-import { addXp } from "../../shared/battle";
+import { addXp, LEVEL_MAX } from "../../shared/battle";
+import {
+  ACHIEVEMENT_CODES, ACHIEVEMENTS, ARENA_QUESTS, applyRp, dailyQuests, questProgress, rankFor, RANKS, rpDelta, TOURNAMENT_STAGES, unlockedBy,
+  type AchievementCode, type ArenaQuestCode, type Game,
+} from "../../shared/progression";
 
 export const DIFFICULTY = {
   EASY: { scale: 0.85, rarities: ["COMMON", "RARE"] },
@@ -22,6 +26,8 @@ export const XP_WIN = 30;
 export const XP_LOSS = 10;
 export const XP_MVP_BONUS = 20;
 export const XP_ROOMS_PER_DAY = 5;
+export const XP_STAGE_BONUS = 10;
+export const TOURNAMENT_ROUNDS = TOURNAMENT_STAGES.length;
 export const EMOTES_KEPT = 10;
 export const EMOTE_COOLDOWN_MS = 1000;
 const OPEN_STATUSES = "('WAITING','PICKING','BATTLE')";
@@ -31,6 +37,7 @@ const createSchema = z.object({
   theme: z.enum(["VOLCANO", "BEACH", "FOREST", "SNOWPEAK", "SPACE", "STADIUM", "RANDOM"] satisfies (ThemeKind | "RANDOM")[]).optional(),
   prize: z.number().int().min(0).max(200),
   autoParent: z.boolean(),
+  mode: z.enum(["DUEL", "TOURNAMENT"]).optional(),
 });
 const teamSchema = z.object({
   childCharacterIds: z.array(z.string().min(1)).min(1).max(3),
@@ -51,6 +58,13 @@ type Room = {
   parent_team: string; state: string | null; version: number;
   winner: Side | null; reward_points: number; xp_awards: string | null;
   emotes: string | null; emote_seq: number; weather: WeatherKind | null; theme: ThemeKind | null;
+  mode: "DUEL" | "TOURNAMENT"; stage: number; stage_teams: string | null; results: string | null;
+};
+type Results = {
+  rp: { before: number; after: number; delta: number; limited: boolean };
+  rank_ups: { key: string; icon: string; label: string; bonus: number }[];
+  achievements: { code: AchievementCode; icon: string; label: string; points: number }[];
+  quests: { code: ArenaQuestCode; icon: string; label: string; points: number }[];
 };
 type Emote = { seq: number; side: Side; emoji: string; at: number };
 type XpAward = { name: string; gained: number; level: number; levels_gained: number };
@@ -101,8 +115,12 @@ async function view(env: Env, room: Room, side: Side) {
       emote_seq: room.emote_seq,
       weather: room.weather ?? "CLEAR",
       theme: room.theme,
+      mode: room.mode,
+      stage: room.stage,
     },
     parent_team: JSON.parse(room.parent_team) as CharacterInfo[],
+    stage_teams: room.stage_teams ? JSON.parse(room.stage_teams) as CharacterInfo[][] : null,
+    results: room.results && room.results !== "{}" ? JSON.parse(room.results) as Results : null,
     state,
     mvp: best ? { name: best.name, damage: best.damageDealt } : null,
     xp_awards: room.xp_awards ? JSON.parse(room.xp_awards) as XpAward[] : null,
@@ -127,7 +145,9 @@ async function reward(env: Env, room: Room, winner: Side) {
   const counted = await env.DB.prepare(
     "SELECT count(*) AS n FROM arena_rooms WHERE child_id = ? AND reward_day = ? AND reward_points > 0",
   ).bind(room.child_id, day).first<{ n: number }>();
-  const points = (counted?.n ?? 0) >= REWARDED_ROOMS_PER_DAY ? 0 : winner === "CHILD" ? room.prize : LOSS_CONSOLATION;
+  const tournament = room.mode === "TOURNAMENT";
+  const consolation = LOSS_CONSOLATION * (tournament ? room.stage : 1);
+  const points = (counted?.n ?? 0) >= REWARDED_ROOMS_PER_DAY ? 0 : winner === "CHILD" ? room.prize : consolation;
   if (points <= 0) return 0;
   try {
     await env.DB.batch([
@@ -136,7 +156,7 @@ async function reward(env: Env, room: Room, winner: Side) {
            (id, child_id, created_by, transaction_type, points, reason, reference_type, reference_id)
          VALUES (?, ?, ?, 'EARN', ?, ?, 'ARENA', ?)`,
       ).bind(crypto.randomUUID(), room.child_id, room.parent_user_id, points,
-        winner === "CHILD" ? "⚔️ ชนะ Arena" : "⚔️ สู้เต็มที่ใน Arena", room.id),
+        winner === "CHILD" ? (tournament ? "👑 แชมป์ทัวร์นาเมนต์ Arena" : "⚔️ ชนะ Arena") : "⚔️ สู้เต็มที่ใน Arena", room.id),
       env.DB.prepare("UPDATE arena_rooms SET reward_points = ?, reward_day = ? WHERE id = ?").bind(points, day, room.id),
     ]);
   } catch (cause) {
@@ -164,6 +184,7 @@ async function awardXp(env: Env, room: Room, state: BattleState) {
   }
 
   const best = state.winner === "CHILD" ? mvp(state) : null;
+  const roundBonus = room.mode === "TOURNAMENT" ? XP_STAGE_BONUS * stagesCleared(room, state) : 0;
   const awards: XpAward[] = [];
   const updates: D1PreparedStatement[] = [];
   for (const fighter of state.teams.CHILD.fighters) {
@@ -171,7 +192,7 @@ async function awardXp(env: Env, room: Room, state: BattleState) {
     const owned = await env.DB.prepare("SELECT level, xp FROM child_characters WHERE id = ? AND child_id = ?")
       .bind(fighter.owned_id, room.child_id).first<{ level: number; xp: number }>();
     if (!owned) continue; // released or evolved away mid-battle
-    const gained = (state.winner === "CHILD" ? XP_WIN : XP_LOSS) + (best === fighter ? XP_MVP_BONUS : 0);
+    const gained = (state.winner === "CHILD" ? XP_WIN : XP_LOSS) + (best === fighter ? XP_MVP_BONUS : 0) + roundBonus;
     const next = addXp(owned.level, owned.xp, gained);
     updates.push(env.DB.prepare("UPDATE child_characters SET level = ?, xp = ? WHERE id = ?").bind(next.level, next.xp, fighter.owned_id));
     awards.push({ name: fighter.name, gained, level: next.level, levels_gained: next.levelsGained });
@@ -199,20 +220,153 @@ async function chargeItem(env: Env, room: Room, userId: string, kind: ItemKind) 
   }
 }
 
+// A tournament round the child won isn't the end: the room stays in BATTLE until
+// the child moves on to the next round.
+const roundWon = (room: Room, state: BattleState) =>
+  room.mode === "TOURNAMENT" && state.winner === "CHILD" && room.stage < TOURNAMENT_ROUNDS;
+const stagesCleared = (room: Room, state: BattleState) => (state.winner === "CHILD" ? room.stage : room.stage - 1);
+
 async function saveState(env: Env, room: Room, state: BattleState) {
-  const status = state.winner ? "FINISHED" : "BATTLE";
+  const finished = Boolean(state.winner) && !roundWon(room, state);
   const result = await env.DB.prepare(
     `UPDATE arena_rooms SET state = ?, status = ?, winner = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND version = ?`,
-  ).bind(JSON.stringify(state), status, state.winner, room.id, room.version).run();
+  ).bind(JSON.stringify(state), finished ? "FINISHED" : "BATTLE", finished ? state.winner : null, room.id, room.version).run();
   return result.meta.changes === 1;
+}
+
+// Inserts a one-time EARN row; false when this reference was already paid.
+async function payOnce(env: Env, room: Room, type: string, reference: string, points: number, reason: string) {
+  if (points <= 0) return false;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO point_transactions
+         (id, child_id, created_by, transaction_type, points, reason, reference_type, reference_id)
+       VALUES (?, ?, ?, 'EARN', ?, ?, ?, ?)`,
+    ).bind(crypto.randomUUID(), room.child_id, room.parent_user_id, points, reason, type, reference).run();
+    return true;
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (message.includes("UNIQUE constraint failed")) return false;
+    throw cause;
+  }
+}
+
+type ScoredRow = { mode: Room["mode"]; difficulty: Room["difficulty"]; stage: number; winner: Side | null; state: string };
+
+function gameOf(row: Omit<ScoredRow, "state">, state: BattleState): Game {
+  const fighters = state.teams.CHILD.fighters;
+  const alive = fighters.filter((fighter) => fighter.hp > 0);
+  return {
+    won: row.winner === "CHILD",
+    mode: row.mode,
+    difficulty: row.difficulty,
+    teamSize: fighters.length,
+    alive: alive.length,
+    lastHpShare: alive.length === 1 ? alive[0].hp / alive[0].stats.hp : 1,
+    finisher: state.finisher,
+    tally: tallyOf(state, "CHILD"),
+  };
+}
+
+// Today's scored rooms (rooms finished before scoring existed don't count).
+async function todaysGames(env: Env, childId: string, day: string) {
+  const rows = await env.DB.prepare(
+    `SELECT mode, difficulty, stage, winner, state FROM arena_rooms
+     WHERE child_id = ? AND xp_day = ? AND status = 'FINISHED' AND state IS NOT NULL AND results IS NOT NULL`,
+  ).bind(childId, day).all<ScoredRow>();
+  return rows.results.map((row) => gameOf(row, JSON.parse(row.state) as BattleState));
+}
+
+// Scores a finished room once: rank points (and rank-up bonuses), achievements,
+// and today's arena quests. Runs after XP so the level achievement sees new levels.
+async function score(env: Env, room: Room, state: BattleState) {
+  if (!room.child_id || !state.winner) return;
+  const claim = await env.DB.prepare("UPDATE arena_rooms SET results = '{}' WHERE id = ? AND results IS NULL").bind(room.id).run();
+  if (!claim.meta.changes) return;
+  const childId = room.child_id;
+  const fresh = (await env.DB.prepare("SELECT xp_day, xp_awards FROM arena_rooms WHERE id = ?").bind(room.id).first<{ xp_day: string | null; xp_awards: string | null }>())!;
+  const day = fresh.xp_day ?? thaiDay();
+  const game = gameOf({ ...room, winner: state.winner }, state);
+
+  // Rank points follow the daily XP limit, so farming easy rooms stops counting.
+  const limited = fresh.xp_awards === "[]";
+  const delta = limited ? 0 : rpDelta({ mode: room.mode, difficulty: room.difficulty, won: game.won, stagesCleared: stagesCleared(room, state) });
+  const child = await env.DB.prepare("SELECT arena_rp FROM children WHERE id = ?").bind(childId).first<{ arena_rp: number }>();
+  const before = child?.arena_rp ?? 0;
+  const after = applyRp(before, delta);
+  if (after !== before) await env.DB.prepare("UPDATE children SET arena_rp = ? WHERE id = ?").bind(after, childId).run();
+  const results: Results = { rp: { before, after, delta: after - before, limited }, rank_ups: [], achievements: [], quests: [] };
+  for (const rank of RANKS.slice(rankFor(before).index + 1, rankFor(after).index + 1)) {
+    const paid = await payOnce(env, room, "ARENA_RANK", childId + ":" + rank.key, rank.bonus, rank.icon + " ขึ้นแรงก์ " + rank.label + " ใน Arena");
+    results.rank_ups.push({ key: rank.key, icon: rank.icon, label: rank.label, bonus: paid ? rank.bonus : 0 });
+  }
+
+  const finished = await env.DB.prepare(
+    `SELECT winner, theme FROM arena_rooms WHERE child_id = ? AND status = 'FINISHED'
+     ORDER BY updated_at DESC, rowid DESC LIMIT 500`,
+  ).bind(childId).all<{ winner: Side | null; theme: string | null }>();
+  let streak = 0;
+  for (const row of finished.results) {
+    if (row.winner !== "CHILD") break;
+    streak += 1;
+  }
+  const level = await env.DB.prepare("SELECT max(level) AS level FROM child_characters WHERE child_id = ? AND status = 'OWNED'").bind(childId).first<{ level: number | null }>();
+  const career = {
+    wins: finished.results.filter((row) => row.winner === "CHILD").length,
+    streak,
+    themesWon: finished.results.filter((row) => row.winner === "CHILD" && row.theme).map((row) => row.theme!),
+    maxLevel: level?.level ?? 1,
+  };
+  for (const code of unlockedBy(game, career)) {
+    const inserted = await env.DB.prepare("INSERT OR IGNORE INTO arena_achievements (child_id, code, room_id) VALUES (?, ?, ?)").bind(childId, code, room.id).run();
+    if (!inserted.meta.changes) continue;
+    const info = ACHIEVEMENTS[code];
+    const paid = await payOnce(env, room, "ACHIEVEMENT", childId + ":" + code, info.points, "🏅 ความสำเร็จ Arena: " + info.icon + " " + info.label);
+    results.achievements.push({ code, icon: info.icon, label: info.label, points: paid ? info.points : 0 });
+  }
+
+  const games = await todaysGames(env, childId, day);
+  for (const code of dailyQuests(childId, day)) {
+    const quest = ARENA_QUESTS[code];
+    if (questProgress(code, games) < quest.target) continue;
+    if (await payOnce(env, room, "ARENA_QUEST", childId + ":" + day + ":" + code, quest.points, "📋 ภารกิจ Arena: " + quest.label)) {
+      results.quests.push({ code, icon: quest.icon, label: quest.label, points: quest.points });
+    }
+  }
+
+  await env.DB.prepare("UPDATE arena_rooms SET results = ? WHERE id = ?").bind(JSON.stringify(results), room.id).run();
+}
+
+// Rank, achievements, and today's arena quests for one child.
+async function profile(env: Env, childId: string) {
+  const day = thaiDay();
+  const child = await env.DB.prepare("SELECT arena_rp FROM children WHERE id = ?").bind(childId).first<{ arena_rp: number }>();
+  const unlocked = await env.DB.prepare("SELECT code, unlocked_at FROM arena_achievements WHERE child_id = ?").bind(childId).all<{ code: string; unlocked_at: string }>();
+  const when = new Map(unlocked.results.map((row) => [row.code, row.unlocked_at]));
+  const games = await todaysGames(env, childId, day);
+  return {
+    rank: rankFor(child?.arena_rp ?? 0),
+    achievements: ACHIEVEMENT_CODES.map((code) => {
+      const { icon, label, detail, points } = ACHIEVEMENTS[code];
+      return { code, icon, label, detail, points, unlocked_at: when.get(code) ?? null };
+    }),
+    quests: {
+      day,
+      list: dailyQuests(childId, day).map((code) => {
+        const { icon, label, target, points } = ARENA_QUESTS[code];
+        const progress = questProgress(code, games);
+        return { code, icon, label, target, points, progress, done: progress >= target };
+      }),
+    },
+  };
 }
 
 export const HISTORY_LIMIT = 100;
 export const RECENT_SHOWN = 20;
 
 type HistoryRow = {
-  code: string; difficulty: keyof typeof DIFFICULTY; winner: Side; state: string;
+  code: string; difficulty: keyof typeof DIFFICULTY; winner: Side; state: string; mode: Room["mode"]; stage: number;
   reward_points: number; finished_at: string; parent_name: string;
 };
 type Monster = { id: string; name: string; image_url: string; type_primary: string; type_secondary: string | null; level?: number };
@@ -221,7 +375,7 @@ type Monster = { id: string; name: string; image_url: string; type_primary: stri
 // record, the child's most successful monsters, and the latest rooms.
 async function history(env: Env, childId: string) {
   const rows = await env.DB.prepare(
-    `SELECT r.code, r.difficulty, r.winner, r.state, r.reward_points, r.updated_at AS finished_at, u.display_name AS parent_name
+    `SELECT r.code, r.difficulty, r.winner, r.state, r.mode, r.stage, r.reward_points, r.updated_at AS finished_at, u.display_name AS parent_name
      FROM arena_rooms r JOIN users u ON u.id = r.parent_user_id
      WHERE r.child_id = ? AND r.status = 'FINISHED' AND r.state IS NOT NULL
      ORDER BY r.updated_at DESC LIMIT ?`,
@@ -243,7 +397,7 @@ async function history(env: Env, childId: string) {
   }
 
   const byDifficulty = Object.fromEntries((Object.keys(DIFFICULTY) as (keyof typeof DIFFICULTY)[]).map((level) => {
-    const played = games.filter((game) => game.difficulty === level);
+    const played = games.filter((game) => game.mode !== "TOURNAMENT" && game.difficulty === level);
     return [level, { wins: played.filter((game) => game.winner === "CHILD").length, losses: played.filter((game) => game.winner !== "CHILD").length }];
   }));
 
@@ -277,6 +431,8 @@ async function history(env: Env, childId: string) {
       win_rate: games.length ? Math.round((wins / games.length) * 100) : 0,
       current_streak: current,
       best_streak: best,
+      tournaments: games.filter((game) => game.mode === "TOURNAMENT").length,
+      championships: games.filter((game) => game.mode === "TOURNAMENT" && game.winner === "CHILD").length,
     },
     by_difficulty: byDifficulty,
     top_monsters: topMonsters,
@@ -285,6 +441,8 @@ async function history(env: Env, childId: string) {
       return {
         code: game.code,
         difficulty: game.difficulty,
+        mode: game.mode,
+        stage: game.stage,
         winner: game.winner,
         finished_at: game.finished_at,
         parent_name: game.parent_name,
@@ -306,14 +464,24 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
     const parsed = createSchema.safeParse(await readJson<unknown>(request));
     if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid room settings.");
-    const difficulty = DIFFICULTY[parsed.data.difficulty];
-
-    const pool = await env.DB.prepare(
-      `SELECT id, name, image_url, rarity, type_primary, type_secondary FROM characters
-       WHERE is_active = 1 AND rarity IN (${difficulty.rarities.map(() => "?").join(",")})`,
-    ).bind(...difficulty.rarities).all<CharacterInfo>();
-    const team = [...pool.results].sort(() => rng() - 0.5).slice(0, PARENT_TEAM_SIZE);
-    if (team.length === 0) return error(409, "NO_CHARACTERS", "No characters available.");
+    const tournament = parsed.data.mode === "TOURNAMENT";
+    // A tournament plays every round against the system, getting harder each round.
+    const levels = tournament ? TOURNAMENT_STAGES.map((stage) => stage.difficulty) : [parsed.data.difficulty];
+    const all = await env.DB.prepare(
+      "SELECT id, name, image_url, rarity, type_primary, type_secondary FROM characters WHERE is_active = 1",
+    ).all<CharacterInfo>();
+    const used = new Set<string>();
+    const teams = levels.map((level) => {
+      const allowed = all.results.filter((monster) => (DIFFICULTY[level].rarities as readonly string[]).includes(monster.rarity));
+      // Prefer monsters not already met in an earlier round, if there are enough.
+      const fresh = allowed.filter((monster) => !used.has(monster.id));
+      const pool = fresh.length >= PARENT_TEAM_SIZE ? fresh : allowed;
+      const team = [...pool].sort(() => rng() - 0.5).slice(0, PARENT_TEAM_SIZE);
+      team.forEach((monster) => used.add(monster.id));
+      return team;
+    });
+    const team = teams[0];
+    if (teams.some((round) => round.length === 0)) return error(409, "NO_CHARACTERS", "No characters available.");
 
     const theme = (!parsed.data.theme || parsed.data.theme === "RANDOM"
       ? THEME_KINDS[Math.floor(rng() * THEME_KINDS.length)]
@@ -326,9 +494,10 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
       const id = crypto.randomUUID();
       try {
         await env.DB.prepare(
-          `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team, weather, theme)
-           VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?, ?, ?)`,
-        ).bind(id, code, user.id, parsed.data.difficulty, parsed.data.prize, parsed.data.autoParent ? 1 : 0, JSON.stringify(team), weather, theme).run();
+          `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team, weather, theme, mode, stage_teams)
+           VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?, ?, ?, ?, ?)`,
+        ).bind(id, code, user.id, levels[0], parsed.data.prize, parsed.data.autoParent || tournament ? 1 : 0, JSON.stringify(team), weather, theme,
+          tournament ? "TOURNAMENT" : "DUEL", tournament ? JSON.stringify(teams) : null).run();
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         if (message.includes("UNIQUE constraint failed")) continue;
@@ -340,7 +509,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     return error(503, "NO_CODE", "ลองสร้างห้องใหม่อีกครั้ง");
   }
 
-  if (pathname === "/api/arena/history" && request.method === "GET") {
+  if ((pathname === "/api/arena/history" || pathname === "/api/arena/profile") && request.method === "GET") {
     let childId: string | null;
     if (user.role === "CHILD") {
       childId = (await childOf(env, user))?.id ?? null;
@@ -349,7 +518,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
       if (childId && !(await childCanJoin(env, user.id, childId))) childId = null;
     }
     if (!childId) return error(404, "CHILD_NOT_FOUND", "Child not found.");
-    return json(await history(env, childId));
+    return json(pathname === "/api/arena/profile" ? await profile(env, childId) : await history(env, childId));
   }
 
   if (pathname === "/api/arena/rooms/current" && request.method === "GET") {
@@ -362,7 +531,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     return json(room ? await view(env, room, user.role === "PARENT" ? "PARENT" : "CHILD") : { room: null });
   }
 
-  const match = pathname.match(/^\/api\/arena\/rooms\/(\d{4})(?:\/(join|team|action|cancel|emote))?$/);
+  const match = pathname.match(/^\/api\/arena\/rooms\/(\d{4})(?:\/(join|team|action|cancel|emote|next))?$/);
   if (!match) return null;
   const [, code, verb] = match;
   const room = await loadRoom(env, code);
@@ -423,13 +592,15 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     if (owned.results.length !== ids.length) return error(400, "INVALID_TEAM", "เลือกได้เฉพาะตัวใน Collection");
     const ordered = ids.map((id) => owned.results.find((row) => row.owned_id === id)!);
 
-    const parentLevel = parentLevelFor(ordered.map((monster) => monster.level));
+    const bonus = room.mode === "TOURNAMENT" ? TOURNAMENT_STAGES[0].levelBonus : 0;
+    const parentLevel = Math.min(LEVEL_MAX, parentLevelFor(ordered.map((monster) => monster.level)) + bonus);
     const parentTeam = (JSON.parse(room.parent_team) as CharacterInfo[]).map((monster) => ({ ...monster, level: parentLevel }));
     const childTeam = makeTeam(ordered);
     if (parsed.data.item) childTeam.item = { kind: parsed.data.item, used: false };
     const weather = room.weather && (WEATHER_KINDS as string[]).includes(room.weather) ? room.weather : "CLEAR";
     const theme = room.theme && (THEME_KINDS as string[]).includes(room.theme) ? room.theme : undefined;
-    const state = startBattle(childTeam, makeTeam(parentTeam, DIFFICULTY[room.difficulty].scale), weather, theme);
+    const scale = room.mode === "TOURNAMENT" ? TOURNAMENT_STAGES[0].scale : DIFFICULTY[room.difficulty].scale;
+    const state = startBattle(childTeam, makeTeam(parentTeam, scale), weather, theme);
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
   }
@@ -462,10 +633,34 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
 
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     if (itemKind) await chargeItem(env, room, user.id, itemKind);
-    if (state.winner) {
+    if (state.winner && !roundWon(room, state)) {
       await reward(env, room, state.winner);
       await awardXp(env, room, state);
+      await score(env, room, state);
     }
+    return json(await view(env, (await loadRoom(env, code))!, side));
+  }
+
+  // Tournament: after winning a round, the child moves on to the next opponent.
+  if (verb === "next") {
+    if (side !== "CHILD") return error(403, "FORBIDDEN", "Child role required.");
+    const previous = room.state ? JSON.parse(room.state) as BattleState : null;
+    if (room.status !== "BATTLE" || !previous || !roundWon(room, previous) || !room.stage_teams) {
+      return error(409, "NO_NEXT_ROUND", "ยังไปรอบต่อไปไม่ได้");
+    }
+    const stage = TOURNAMENT_STAGES[room.stage];
+    const opponents = (JSON.parse(room.stage_teams) as CharacterInfo[][])[room.stage];
+    const childLevels = previous.teams.CHILD.fighters.map((fighter) => fighter.level ?? 1);
+    const level = Math.min(LEVEL_MAX, parentLevelFor(childLevels) + stage.levelBonus);
+    const theme = THEME_KINDS.filter((kind) => kind !== room.theme)[Math.floor(rng() * (THEME_KINDS.length - 1))];
+    const weather = theme === "SPACE" ? "CLEAR" : rollWeather(rng, undefined, THEMES[theme].weather);
+    const state = startNextStage(previous, makeTeam(opponents.map((monster) => ({ ...monster, level })), stage.scale), weather, theme);
+    const result = await env.DB.prepare(
+      `UPDATE arena_rooms SET stage = stage + 1, difficulty = ?, parent_team = ?, theme = ?, weather = ?, state = ?,
+         version = version + 1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND version = ?`,
+    ).bind(stage.difficulty, JSON.stringify(opponents), theme, weather, JSON.stringify(state), room.id, room.version).run();
+    if (!result.meta.changes) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
   }
 

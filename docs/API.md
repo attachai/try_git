@@ -122,7 +122,7 @@ A set is every active character sharing a `type_primary`, worth 30 points per ch
 
 ## Arena
 
-Parent-vs-child turn-based battles with room codes. The rules, endpoints, rewards and balance numbers are in [ARENA.md](ARENA.md).
+Parent-vs-child turn-based battles with room codes, three-round tournaments, rank, achievements and daily arena quests. The rules, endpoints (including `/api/arena/profile` and `POST /api/arena/rooms/:code/next`), rewards and balance numbers are in [ARENA.md](ARENA.md).
 
 ## Error shape
 

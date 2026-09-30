@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { TypeBadges } from "../TypeBadge";
+import { TOURNAMENT_STAGES } from "../../../shared/progression";
 import { DIFFICULTY_LABEL } from "./useRoom";
 
 type Monster = { id: string; name: string; image_url: string; type_primary: string; type_secondary: string | null; level?: number };
 type Difficulty = keyof typeof DIFFICULTY_LABEL;
 type History = {
-  summary: { played: number; wins: number; losses: number; win_rate: number; current_streak: number; best_streak: number };
+  summary: { played: number; wins: number; losses: number; win_rate: number; current_streak: number; best_streak: number; tournaments: number; championships: number };
   by_difficulty: Record<Difficulty, { wins: number; losses: number }>;
   top_monsters: { monster: Monster; battles: number; wins: number; damage: number; mvp: number }[];
   recent: {
-    code: string; difficulty: Difficulty; winner: "CHILD" | "PARENT"; finished_at: string; parent_name: string;
+    code: string; difficulty: Difficulty; mode: "DUEL" | "TOURNAMENT"; stage: number; winner: "CHILD" | "PARENT"; finished_at: string; parent_name: string;
     rounds: number; reward_points: number; mvp: { name: string; damage: number } | null;
     child_team: Monster[]; parent_team: Monster[];
   }[];
@@ -68,6 +69,7 @@ export default function ArenaHistory({ childId, childName, refreshKey }: Props) 
             {(Object.keys(DIFFICULTY_LABEL) as Difficulty[]).map((level) => (
               <span key={level}>{DIFFICULTY_LABEL[level]} <strong>{data.by_difficulty[level].wins}-{data.by_difficulty[level].losses}</strong></span>
             ))}
+            {summary.tournaments > 0 && <span>🏟️ แชมป์ <strong>{summary.championships}/{summary.tournaments}</strong></span>}
           </div>
 
           {data.top_monsters.length > 0 && (
@@ -91,12 +93,13 @@ export default function ArenaHistory({ childId, childName, refreshKey }: Props) 
           <ol className="history-list">
             {data.recent.map((game) => {
               const won = game.winner === "CHILD";
+              const tournament = game.mode === "TOURNAMENT";
               return (
                 <li key={game.code + game.finished_at} className={won ? "win" : "loss"}>
                   <div className="history-row-top">
-                    <strong>{won ? "🏆 ชนะ" : "💪 แพ้"}</strong>
-                    <span>vs {game.parent_name}</span>
-                    <span className="history-chip">{DIFFICULTY_LABEL[game.difficulty]}</span>
+                    <strong>{tournament ? (won ? "👑 แชมป์" : "💪 ตก" + (TOURNAMENT_STAGES[game.stage - 1]?.label ?? "")) : won ? "🏆 ชนะ" : "💪 แพ้"}</strong>
+                    <span>{tournament ? "ทัวร์นาเมนต์" : "vs " + game.parent_name}</span>
+                    <span className="history-chip">{tournament ? "🏟️ " + game.stage + "/" + TOURNAMENT_STAGES.length : DIFFICULTY_LABEL[game.difficulty]}</span>
                     <small>{when(game.finished_at)}</small>
                   </div>
                   <div className="history-row-teams">

@@ -19,12 +19,24 @@ export type RoomView = {
     emote_seq: number;
     weather: WeatherKind;
     theme: ThemeKind | null;
+    mode: "DUEL" | "TOURNAMENT";
+    stage: number;
   };
   parent_team: ArenaCharacter[];
+  stage_teams: ArenaCharacter[][] | null;
+  results: RoomResults | null;
   state: BattleState | null;
   mvp: { name: string; damage: number } | null;
   xp_awards: { name: string; gained: number; level: number; levels_gained: number }[] | null;
   emotes: { seq: number; side: Side; emoji: string; at: number }[];
+};
+
+// Rank, achievements, and quests earned when the room finished.
+export type RoomResults = {
+  rp: { before: number; after: number; delta: number; limited: boolean };
+  rank_ups: { key: string; icon: string; label: string; bonus: number }[];
+  achievements: { code: string; icon: string; label: string; points: number }[];
+  quests: { code: string; icon: string; label: string; points: number }[];
 };
 
 export const POLL_MS = 1500;
