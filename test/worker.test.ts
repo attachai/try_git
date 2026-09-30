@@ -587,6 +587,48 @@ describe("arena rooms", () => {
     expect((await post(`/api/arena/rooms/${room.code}/join`, await sessionCookie("child-user"), {})).status).toBe(404);
   });
 
+  async function playToEnd(kid: string, code: string, view: View) {
+    let current = view;
+    for (let i = 0; i < 100 && current.room.status === "BATTLE"; i += 1) {
+      current = await (await post(`/api/arena/rooms/${code}/action`, kid, { version: current.room.version, action: "ATTACK" })).json() as View;
+    }
+    return current as View & { xp_awards: { name: string; gained: number; level: number; levels_gained: number }[] | null };
+  }
+
+  it("awards XP to the child's team once per room and it survives evolving", async () => {
+    const { kid, code, view } = await roomWithTeam(true);
+    const done = await playToEnd(kid, code, view);
+    const won = done.room.winner === "CHILD";
+    // Solo team: on a win the only fighter is also the MVP.
+    const gained = won ? 30 + 20 : 10;
+    expect(done.xp_awards).toEqual([{ name: "Starter", gained, level: 1 + Math.floor(gained / 50), levels_gained: Math.floor(gained / 50) }]);
+    const owned = await env.DB.prepare("SELECT id, level, xp FROM child_characters WHERE character_id = 'starter'").first<{ id: string; level: number; xp: number }>();
+    expect(owned).toMatchObject({ level: 1 + Math.floor(gained / 50), xp: gained % 50 });
+
+    // Re-reading the finished room doesn't pay again.
+    await SELF.fetch(`https://example.test/api/arena/rooms/${code}`, { headers: { cookie: kid } });
+    expect((await env.DB.prepare("SELECT xp FROM child_characters WHERE id = ?").bind(owned!.id).first<{ xp: number }>())!.xp).toBe(owned!.xp);
+
+    await env.DB.prepare("UPDATE child_characters SET level = 4, xp = 12 WHERE id = ?").bind(owned!.id).run();
+    await env.DB.prepare("UPDATE children SET points_balance = 1000 WHERE id = 'child'").run();
+    expect((await post("/api/collection/evolve", kid, { childCharacterId: owned!.id })).status).toBe(201);
+    const evolved = await env.DB.prepare("SELECT level, xp FROM child_characters WHERE character_id = 'evolved' AND status = 'OWNED'").first();
+    expect(evolved).toEqual({ level: 4, xp: 12 });
+  });
+
+  it("stops handing out XP after the daily room limit", async () => {
+    await env.DB.prepare(
+      `INSERT INTO arena_rooms (id, code, parent_user_id, child_id, difficulty, prize, status, parent_team, xp_day, xp_awards)
+       SELECT 'old' || value, '99' || value, 'parent', 'child', 'EASY', 0, 'FINISHED', '[]', ?, '[{"name":"x"}]'
+       FROM json_each('[10,11,12,13,14]')`,
+    ).bind(new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)).run();
+    const { kid, code, view } = await roomWithTeam(true);
+    const done = await playToEnd(kid, code, view);
+    expect(done.xp_awards).toEqual([]);
+    const owned = await env.DB.prepare("SELECT level, xp FROM child_characters WHERE character_id = 'starter'").first();
+    expect(owned).toEqual({ level: 1, xp: 0 });
+  });
+
   it("validates room settings", async () => {
     const parent = await sessionCookie("parent");
     expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 500, autoParent: false })).status).toBe(400);

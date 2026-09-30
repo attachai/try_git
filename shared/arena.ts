@@ -12,6 +12,9 @@ export type StatusKind =
 export type Status = { kind: StatusKind; turns: number };
 export type Fighter = {
   id: string;
+  // The child's owned copy (child_characters.id), used to award XP. Absent for the parent team.
+  owned_id?: string;
+  level?: number;
   name: string;
   image_url: string;
   rarity: string;

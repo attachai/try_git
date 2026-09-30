@@ -43,13 +43,40 @@ export function archetypeLabel(typePrimary: string) {
   return ARCHETYPES[archetypeOf(typePrimary)].label;
 }
 
-export function computeStats(character: { rarity: string; type_primary: string }): Stats {
+// Arena levels: each level above 1 adds LEVEL_STEP to HP/ATK/DEF, so a max-level
+// COMMON (+27%) stays just below an EPIC (+30%) and evolving is still worth it.
+export const LEVEL_MAX = 10;
+export const LEVEL_STEP = 0.03;
+
+export function levelScale(level = 1) {
+  return 1 + LEVEL_STEP * (Math.min(LEVEL_MAX, Math.max(1, level)) - 1);
+}
+
+// XP needed to go from `level` to the next one.
+export function xpToNext(level: number) {
+  return level >= LEVEL_MAX ? 0 : 50 * level;
+}
+
+// Adds XP (xp is progress inside the current level) and rolls over levels.
+export function addXp(level: number, xp: number, gained: number) {
+  let nextLevel = level;
+  let progress = xp + gained;
+  while (nextLevel < LEVEL_MAX && progress >= xpToNext(nextLevel)) {
+    progress -= xpToNext(nextLevel);
+    nextLevel += 1;
+  }
+  if (nextLevel >= LEVEL_MAX) progress = 0;
+  return { level: nextLevel, xp: progress, levelsGained: nextLevel - level };
+}
+
+export function computeStats(character: { rarity: string; type_primary: string; level?: number | null }): Stats {
   const archetype = ARCHETYPES[archetypeOf(character.type_primary)];
   const rarity = RARITY[character.rarity] ?? RARITY.COMMON;
+  const scale = rarity.scale * levelScale(character.level ?? 1);
   return {
-    hp: Math.round(BASE.hp * archetype.hp * rarity.scale),
-    atk: Math.round(BASE.atk * archetype.atk * rarity.scale),
-    def: Math.round(BASE.def * archetype.def * rarity.scale),
+    hp: Math.round(BASE.hp * archetype.hp * scale),
+    atk: Math.round(BASE.atk * archetype.atk * scale),
+    def: Math.round(BASE.def * archetype.def * scale),
     eva: archetype.eva + rarity.bonus,
     crit: archetype.crit + rarity.bonus,
   };

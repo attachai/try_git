@@ -5,7 +5,7 @@ import { TYPE_INFO, TypeBadges } from "../TypeBadge";
 import BattleView from "./BattleView";
 import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
 
-type Owned = { child_character_id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary?: string | null };
+type Owned = { child_character_id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary?: string | null; level: number };
 const TEAM_MAX = 3;
 
 type Props = { collection: Owned[]; onBack: () => void; onFinished: () => Promise<void> };
@@ -126,7 +126,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
                   >
                     {order >= 0 && <span className="arena-pick-order">{order + 1}</span>}
                     <img src={monster.image_url} alt="" />
-                    <strong>{monster.name}</strong>
+                    <strong>{monster.name} <span className="level-chip">Lv.{monster.level}</span></strong>
                     <TypeBadges primary={monster.type_primary} secondary={monster.type_secondary} iconOnly />
                     <small>❤️{stats.hp} ⚔️{stats.atk} 🛡️{stats.def}</small>
                     {beats.length > 0 && <small className="arena-good">💪 ชนะ {beats.map((foe) => foe.name).join(", ")}</small>}

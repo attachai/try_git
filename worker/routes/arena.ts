@@ -7,6 +7,7 @@ import {
   applyAction, ArenaError, chooseAiAction, makeTeam, mvp, startBattle,
   type BattleState, type Rng, type Side,
 } from "../../shared/arena";
+import { addXp } from "../../shared/battle";
 
 export const DIFFICULTY = {
   EASY: { scale: 0.85, rarities: ["COMMON", "RARE"] },
@@ -16,6 +17,10 @@ export const DIFFICULTY = {
 export const PARENT_TEAM_SIZE = 3;
 export const LOSS_CONSOLATION = 10;
 export const REWARDED_ROOMS_PER_DAY = 3;
+export const XP_WIN = 30;
+export const XP_LOSS = 10;
+export const XP_MVP_BONUS = 20;
+export const XP_ROOMS_PER_DAY = 5;
 const OPEN_STATUSES = "('WAITING','PICKING','BATTLE')";
 
 const createSchema = z.object({
@@ -32,8 +37,9 @@ type Room = {
   difficulty: keyof typeof DIFFICULTY; prize: number; auto_parent: number;
   status: "WAITING" | "PICKING" | "BATTLE" | "FINISHED" | "CANCELLED";
   parent_team: string; state: string | null; version: number;
-  winner: Side | null; reward_points: number;
+  winner: Side | null; reward_points: number; xp_awards: string | null;
 };
+type XpAward = { name: string; gained: number; level: number; levels_gained: number };
 
 const rng: Rng = () => {
   const values = new Uint32Array(1);
@@ -82,6 +88,7 @@ async function view(env: Env, room: Room, side: Side) {
     parent_team: JSON.parse(room.parent_team) as CharacterInfo[],
     state,
     mvp: best ? { name: best.name, damage: best.damageDealt } : null,
+    xp_awards: room.xp_awards ? JSON.parse(room.xp_awards) as XpAward[] : null,
   };
 }
 
@@ -120,6 +127,43 @@ async function reward(env: Env, room: Room, winner: Side) {
     throw cause;
   }
   return points;
+}
+
+// Every monster on the child's team earns XP: more for a win, a bonus for the MVP,
+// for up to XP_ROOMS_PER_DAY rooms per Thailand-time day. Claiming xp_day first
+// makes sure a room only ever hands out XP once.
+async function awardXp(env: Env, room: Room, state: BattleState) {
+  if (!room.child_id || !state.winner) return;
+  const day = thaiDay();
+  const counted = await env.DB.prepare(
+    "SELECT count(*) AS n FROM arena_rooms WHERE child_id = ? AND xp_day = ? AND xp_awards <> '[]'",
+  ).bind(room.child_id, day).first<{ n: number }>();
+  const claim = await env.DB.prepare("UPDATE arena_rooms SET xp_day = ? WHERE id = ? AND xp_day IS NULL").bind(day, room.id).run();
+  if (!claim.meta.changes) return;
+  if ((counted?.n ?? 0) >= XP_ROOMS_PER_DAY) {
+    await env.DB.prepare("UPDATE arena_rooms SET xp_awards = '[]' WHERE id = ?").bind(room.id).run();
+    return;
+  }
+
+  const best = state.winner === "CHILD" ? mvp(state) : null;
+  const awards: XpAward[] = [];
+  const updates: D1PreparedStatement[] = [];
+  for (const fighter of state.teams.CHILD.fighters) {
+    if (!fighter.owned_id) continue;
+    const owned = await env.DB.prepare("SELECT level, xp FROM child_characters WHERE id = ? AND child_id = ?")
+      .bind(fighter.owned_id, room.child_id).first<{ level: number; xp: number }>();
+    if (!owned) continue; // released or evolved away mid-battle
+    const gained = (state.winner === "CHILD" ? XP_WIN : XP_LOSS) + (best === fighter ? XP_MVP_BONUS : 0);
+    const next = addXp(owned.level, owned.xp, gained);
+    updates.push(env.DB.prepare("UPDATE child_characters SET level = ?, xp = ? WHERE id = ?").bind(next.level, next.xp, fighter.owned_id));
+    awards.push({ name: fighter.name, gained, level: next.level, levels_gained: next.levelsGained });
+  }
+  // Rooms started before levels existed have no owned ids; leave xp_awards empty (NULL)
+  // so the result screen doesn't claim the daily limit was hit.
+  if (awards.length > 0) {
+    updates.push(env.DB.prepare("UPDATE arena_rooms SET xp_awards = ? WHERE id = ?").bind(JSON.stringify(awards), room.id));
+  }
+  if (updates.length > 0) await env.DB.batch(updates);
 }
 
 async function saveState(env: Env, room: Room, state: BattleState) {
@@ -214,12 +258,12 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     }
     const ids = parsed.data.childCharacterIds;
     const owned = await env.DB.prepare(
-      `SELECT cc.id AS owned_id, c.id, c.name, c.image_url, c.rarity, c.type_primary, c.type_secondary
+      `SELECT cc.id AS owned_id, cc.level, c.id, c.name, c.image_url, c.rarity, c.type_primary, c.type_secondary
        FROM child_characters cc JOIN characters c ON c.id = cc.character_id
        WHERE cc.child_id = ? AND cc.status = 'OWNED' AND cc.id IN (${ids.map(() => "?").join(",")})`,
-    ).bind(room.child_id, ...ids).all<CharacterInfo & { owned_id: string }>();
+    ).bind(room.child_id, ...ids).all<CharacterInfo & { owned_id: string; level: number }>();
     if (owned.results.length !== ids.length) return error(400, "INVALID_TEAM", "เลือกได้เฉพาะตัวใน Collection");
-    const ordered = ids.map((id) => owned.results.find((row) => row.owned_id === id)!).map(({ owned_id: _, ...info }) => info);
+    const ordered = ids.map((id) => owned.results.find((row) => row.owned_id === id)!);
 
     const state = startBattle(makeTeam(ordered), makeTeam(JSON.parse(room.parent_team), DIFFICULTY[room.difficulty].scale));
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
@@ -246,7 +290,10 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     }
 
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
-    if (state.winner) await reward(env, room, state.winner);
+    if (state.winner) {
+      await reward(env, room, state.winner);
+      await awardXp(env, room, state);
+    }
     return json(await view(env, (await loadRoom(env, code))!, side));
   }
 

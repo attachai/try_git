@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseDamage, computeStats, STAT_MAX, strongAgainst, typeMultiplier, weakTo } from "../shared/battle";
+import { addXp, baseDamage, computeStats, STAT_MAX, strongAgainst, typeMultiplier, weakTo, xpToNext } from "../shared/battle";
 
 describe("battle stats", () => {
   it("matches the design examples", () => {
@@ -66,5 +66,26 @@ describe("type matchups", () => {
     expect(baseDamage(25, 15, 1, 0.5, false)).toBe(35);
     expect(baseDamage(25, 15, 1, 0.5, true)).toBe(53);
     expect(baseDamage(5, 30, 0.5, 0, false)).toBe(5);
+  });
+});
+
+describe("arena levels", () => {
+  it("scales HP/ATK/DEF by 3% per level and keeps max-level COMMON below EPIC", () => {
+    const lv1 = computeStats({ rarity: "COMMON", type_primary: "Water" });
+    const lv5 = computeStats({ rarity: "COMMON", type_primary: "Water", level: 5 });
+    expect(lv5.hp).toBe(Math.round(105 * 1.12));
+    expect(lv5.eva).toBe(lv1.eva);
+    const lv10 = computeStats({ rarity: "COMMON", type_primary: "Water", level: 10 });
+    const epic = computeStats({ rarity: "EPIC", type_primary: "Water" });
+    expect(lv10.hp).toBeLessThan(epic.hp);
+    expect(computeStats({ rarity: "COMMON", type_primary: "Water", level: 99 })).toEqual(lv10);
+  });
+
+  it("rolls XP over levels and stops at the cap", () => {
+    expect(xpToNext(1)).toBe(50);
+    expect(addXp(1, 40, 30)).toEqual({ level: 2, xp: 20, levelsGained: 1 });
+    expect(addXp(1, 0, 160)).toEqual({ level: 3, xp: 10, levelsGained: 2 });
+    expect(addXp(9, 440, 50)).toEqual({ level: 10, xp: 0, levelsGained: 1 });
+    expect(addXp(10, 0, 500)).toEqual({ level: 10, xp: 0, levelsGained: 0 });
   });
 });

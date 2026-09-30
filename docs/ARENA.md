@@ -2,7 +2,7 @@
 
 Turn-based battles between a child and a parent. The rules live in `shared/` and are used by both the UI and the Worker. The Worker is authoritative: it rolls every random number and computes every hit.
 
-- `shared/battle.ts`: stats, type chart, base damage
+- `shared/battle.ts`: stats, levels, type chart, base damage
 - `shared/arena.ts`: battle engine (pure, random source injected), specials, statuses, AI
 - `worker/routes/arena.ts`: rooms, joining, team pick, actions, rewards
 - `src/components/arena/`: parent lobby, child join/pick, battle view, polling hook
@@ -59,6 +59,12 @@ Energy: +1 at the end of each of your turns, +1 whenever you're hit, max 5.
 | Normal | ทุ่มสุดตัว | ×2 power, self 🎯 DEF −50% for 1 turn |
 
 Statuses tick (burn/poison) and count down at the end of their owner's turn. When a monster faints, the next one in the chosen order comes in. A team that has lost members gets 🔥 last stand (ATK +15%) on its final monster. Teams of 1–2 get HP +20% instead.
+
+## Levels
+
+Each owned monster (`child_characters.level`, `xp`) has an arena level from 1 to 10. Each level above 1 adds 3% HP/ATK/DEF, so a Lv.10 COMMON (+27%) stays just below an EPIC (+30%) and evolving is still worth it. Evolving carries the level and XP over to the new form.
+
+Every monster on the child's team gets XP when a room finishes: +30 for a win, +10 for a loss, and +20 more for the winning side's MVP. XP counts for up to 5 rooms per child per Thailand-time day. Going from level L to L+1 takes 50 × L XP (50, 100, …, 450; 2,250 total to reach Lv.10). `arena_rooms.xp_day` is claimed before paying, so a room hands out XP once, and `xp_awards` holds the summary shown on the result screen.
 
 ## Rooms
 

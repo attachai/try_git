@@ -38,7 +38,7 @@ export async function collectionRoutes(request: Request, env: Env, pathname: str
 
   if (pathname === "/api/collection" && request.method === "GET") {
     const result = await env.DB.prepare(
-      `SELECT cc.id AS child_character_id, cc.acquired_at, cc.acquisition_type,
+      `SELECT cc.id AS child_character_id, cc.acquired_at, cc.acquisition_type, cc.level, cc.xp,
               c.id AS character_id, c.name, c.slug, c.type_primary, c.type_secondary,
               c.image_url, c.rarity,
               ep.to_character_id, ep.point_cost AS evolution_cost,
@@ -142,10 +142,12 @@ export async function collectionRoutes(request: Request, env: Env, pathname: str
         env.DB.prepare(
           "UPDATE child_characters SET status = 'EVOLVED', evolved_at = CURRENT_TIMESTAMP WHERE id = ? AND child_id = ? AND status = 'OWNED'",
         ).bind(evolution.child_character_id, child.id),
+        // The new form keeps the arena level and XP of the one it evolved from.
         env.DB.prepare(
           `INSERT INTO child_characters
-             (id, child_id, character_id, acquisition_type, evolved_from, status)
-           VALUES (?, ?, ?, 'EVOLUTION', ?, 'OWNED')`,
+             (id, child_id, character_id, acquisition_type, evolved_from, status, level, xp)
+           SELECT ?, ?, ?, 'EVOLUTION', id, 'OWNED', level, xp
+           FROM child_characters WHERE id = ?`,
         ).bind(nextOwnedId, child.id, evolution.to_character_id, evolution.child_character_id),
         env.DB.prepare(
           `INSERT INTO evolution_transactions

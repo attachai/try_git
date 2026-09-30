@@ -5,7 +5,7 @@ import QuestBoard from "./components/QuestBoard";
 import GachaBox from "./components/GachaBox";
 import Pokedex from "./components/Pokedex";
 import { TypeBadges } from "./components/TypeBadge";
-import StatBlock from "./components/StatBlock";
+import StatBlock, { LevelBar } from "./components/StatBlock";
 import ArenaParent from "./components/arena/ArenaParent";
 import ArenaChild from "./components/arena/ArenaChild";
 import { api } from "./lib/api";
@@ -31,6 +31,7 @@ type CollectionItem = {
   child_character_id: string; character_id: string; name: string; slug: string;
   type_primary: string; type_secondary?: string | null; image_url: string; rarity: string;
   evolution_cost?: number | null; evolution_name?: string | null; evolution_image_url?: string | null;
+  level: number; xp: number;
 };
 type ChildTab = "home" | "shop" | "collection" | "pokedex" | "history" | "arena";
 type ParentTab = "home" | "quests" | "arena" | "history" | "family";
@@ -715,6 +716,7 @@ export default function App() {
                         <div className="character-art image-art"><img src={item.image_url} alt={item.name} /></div>
                         <div className="card-row"><h3>{item.name}</h3><span className={"rarity rarity-" + item.rarity.toLowerCase()}>{item.rarity}</span></div>
                         <div className="type-row"><TypeBadges primary={item.type_primary} secondary={item.type_secondary} /></div>
+                        <LevelBar level={item.level} xp={item.xp} />
                         <StatBlock monster={item} />
                         {item.evolution_name && item.evolution_cost ? (
                           <button className="evolve-button" onClick={() => setPendingAction({ kind: "evolve", item })}>
