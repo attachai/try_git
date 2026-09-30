@@ -4,7 +4,7 @@ import { baseDamage, computeStats, typeMultiplier, type Stats } from "./battle";
 import { TYPE_ICON } from "./types";
 
 export type Side = "CHILD" | "PARENT";
-export type Action = "ATTACK" | "SPECIAL" | "GUARD";
+export type Action = "ATTACK" | "SPECIAL" | "GUARD" | "ULTIMATE";
 export type StatusKind =
   | "BURN" | "POISON" | "PARALYZE" | "FREEZE" | "FEAR" | "CONFUSE" // on the target
   | "RAGE" | "ARMOR" | "SWIFT" | "EXPOSED"; // on self
@@ -26,12 +26,13 @@ export type Fighter = {
   guard: boolean;
   damageDealt: number;
 };
-export type Team = { fighters: Fighter[]; active: number; energy: number };
+// `ult` is the ultimate gauge (0–ULT_MAX); optional so older battles still load.
+export type Team = { fighters: Fighter[]; active: number; energy: number; ult?: number };
 // Structured record of what happened, so the UI can animate each beat in order.
 // `side` is who the event happens to; `index` is that fighter's slot in the team.
 export type BattleEvent = {
   seq: number;
-  kind: "attack" | "special" | "hit" | "miss" | "heal" | "status" | "buff" | "tick" | "guard" | "paralyzed" | "faint" | "switch" | "win";
+  kind: "attack" | "special" | "ultimate" | "hit" | "miss" | "heal" | "status" | "buff" | "tick" | "guard" | "paralyzed" | "faint" | "switch" | "win";
   side: Side;
   index: number;
   hp?: number;
@@ -58,6 +59,26 @@ export type Rng = () => number;
 
 export const ENERGY_MAX = 5;
 export const SPECIAL_COST = 3;
+export const ULT_MAX = 100;
+export const ULT_ON_HIT = 15;
+export const ULT_ON_HURT = 10;
+export const ULT_ON_GUARD = 10;
+export const ULTIMATE_POWER = 2.2;
+
+// Ultimate moves reuse the type's special effect at ULTIMATE_POWER.
+export const ULTIMATE_NAMES: Record<string, string> = {
+  Fire: "นรกเพลิง", Water: "สึนามิยักษ์", Grass: "ป่าคลั่ง", Electric: "สายฟ้าพันลูก", Ice: "ยุคน้ำแข็ง",
+  Fighting: "หมัดพันหมื่น", Poison: "หมอกพิษมรณะ", Ground: "แผ่นดินแยก", Flying: "พายุทอร์นาโด",
+  Psychic: "จิตพิฆาต", Bug: "ฝูงมหาภัย", Rock: "อุกกาบาตถล่ม", Ghost: "วิญญาณหลอน", Dragon: "มังกรพิโรธ",
+  Dark: "ราตรีนิรันดร์", Steel: "ปราการเหล็ก", Fairy: "แสงศักดิ์สิทธิ์", Normal: "หมัดสุดพลัง",
+};
+
+export const ultOf = (team: Team) => team.ult ?? 0;
+
+export const EMOTES = ["😆", "😱", "🔥", "👏", "😭", "💪", "😎", "🤣"] as const;
+function gainUlt(team: Team, amount: number) {
+  team.ult = Math.min(ULT_MAX, ultOf(team) + amount);
+}
 export const EVADE_CAP = 40;
 export const LOG_LIMIT = 40;
 export const EVENT_LIMIT = 40;
@@ -211,14 +232,19 @@ function hpText(fighter: Fighter) {
   return fighter.name + " (" + fighter.hp + "/" + fighter.stats.hp + ")";
 }
 
-function hit(state: BattleState, side: Side, special: Special | null, rng: Rng) {
+function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, ultimate = false) {
   const attacker = activeFighter(state, side);
   const defender = activeFighter(state, other(side));
   const icon = TYPE_ICON[attacker.type_primary] ?? "";
-  const move = special ? "ใช้ 🌟 " + icon + " " + special.name + "!" : "⚔️ โจมตี";
+  const move = ultimate
+    ? "ปล่อย 💥 ท่าไม้ตาย " + icon + " " + (ULTIMATE_NAMES[attacker.type_primary] ?? ULTIMATE_NAMES.Normal) + "!!"
+    : special ? "ใช้ 🌟 " + icon + " " + special.name + "!" : "⚔️ โจมตี";
   const attackerIndex = state.teams[side].active;
   const defenderIndex = state.teams[other(side)].active;
-  emit(state, { kind: special ? "special" : "attack", side, index: attackerIndex, type: attacker.type_primary, move: special?.name });
+  emit(state, {
+    kind: ultimate ? "ultimate" : special ? "special" : "attack", side, index: attackerIndex, type: attacker.type_primary,
+    move: ultimate ? ULTIMATE_NAMES[attacker.type_primary] ?? ULTIMATE_NAMES.Normal : special?.name,
+  });
 
   // Special moves never miss, so saving energy for one is always worth it.
   if (!special && rng() * 100 < effectiveEva(defender)) {
@@ -231,7 +257,7 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng) 
   const crit = rng() * 100 < effectiveCrit(attacker);
   const def = special?.pierce ? 0 : effectiveDef(defender);
   let damage = baseDamage(effectiveAtk(state, side, attacker), def, multiplier, rng(), crit);
-  if (special) damage = Math.round(damage * special.power);
+  if (special) damage = Math.round(damage * (ultimate ? ULTIMATE_POWER : special.power));
   let guarded = false;
   if (defender.guard) {
     damage = Math.max(1, Math.round(damage / 2));
@@ -242,6 +268,8 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng) 
   defender.hp -= damage;
   attacker.damageDealt += damage;
   state.teams[other(side)].energy = Math.min(ENERGY_MAX, state.teams[other(side)].energy + 1);
+  if (!ultimate) gainUlt(state.teams[side], ULT_ON_HIT);
+  gainUlt(state.teams[other(side)], ULT_ON_HURT);
 
   push(state, attacker.name + " " + move + multiplierText(multiplier) + (crit ? " คริติคอล! 💥" : "")
     + (guarded ? " (ตั้งรับไว้ ลดครึ่ง 🛡️)" : "") + " → " + defender.name + " −" + damage + " HP (" + defender.hp + "/" + defender.stats.hp + ")");
@@ -321,6 +349,7 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   const team = next.teams[side];
   const fighter = activeFighter(next, side);
   if (action === "SPECIAL" && team.energy < SPECIAL_COST) throw new ArenaError("พลังไม่พอ ต้องมี ⚡ " + SPECIAL_COST);
+  if (action === "ULTIMATE" && ultOf(team) < ULT_MAX) throw new ArenaError("หลอดไม้ตายยังไม่เต็ม");
 
   fighter.guard = false;
 
@@ -330,8 +359,12 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   } else if (action === "GUARD") {
     fighter.guard = true;
     team.energy = Math.min(ENERGY_MAX, team.energy + 1);
+    gainUlt(team, ULT_ON_GUARD);
     push(next, fighter.name + " 🛡️ ตั้งรับ! (พลัง ⚡ " + team.energy + ")");
     emit(next, { kind: "guard", side, index: team.active });
+  } else if (action === "ULTIMATE") {
+    team.ult = 0;
+    hit(next, side, SPECIALS[fighter.type_primary] ?? SPECIALS.Normal, rng, true);
   } else if (action === "SPECIAL") {
     team.energy -= SPECIAL_COST;
     hit(next, side, SPECIALS[fighter.type_primary] ?? SPECIALS.Normal, rng);
@@ -357,6 +390,9 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
 export function chooseAiAction(state: BattleState, side: Side, rng: Rng): Action {
   const me = activeFighter(state, side);
   const foe = activeFighter(state, other(side));
+  if (ultOf(state.teams[side]) >= ULT_MAX) return "ULTIMATE";
+  // Brace when the other side's ultimate is ready and this monster can't take it.
+  if (ultOf(state.teams[other(side)]) >= ULT_MAX && me.hp < me.stats.hp * 0.6 && rng() < 0.5) return "GUARD";
   if (state.teams[side].energy >= SPECIAL_COST && (typeMultiplier(me.type_primary, foe) >= 1 || rng() < 0.5)) return "SPECIAL";
   if (me.hp < me.stats.hp * 0.35 && rng() < 0.4) return "GUARD";
   return "ATTACK";

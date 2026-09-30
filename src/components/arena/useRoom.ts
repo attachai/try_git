@@ -16,11 +16,13 @@ export type RoomView = {
     parent_name: string;
     child_name: string | null;
     my_side: Side;
+    emote_seq: number;
   };
   parent_team: ArenaCharacter[];
   state: BattleState | null;
   mvp: { name: string; damage: number } | null;
   xp_awards: { name: string; gained: number; level: number; levels_gained: number }[] | null;
+  emotes: { seq: number; side: Side; emoji: string; at: number }[];
 };
 
 export const POLL_MS = 1500;
@@ -31,10 +33,12 @@ export const DIFFICULTY_LABEL = { EASY: "ง่าย", NORMAL: "กลาง", 
 // Keeps a room in sync by polling the server while it's still in play.
 export function useRoom(initial: RoomView | null) {
   const [view, setView] = useState<RoomView | null>(initial);
-  const version = useRef(initial?.room.version ?? -1);
+  // A poll is worth re-rendering when the battle moved or a new emoji arrived.
+  const seen = useRef(initial ? initial.room.version + ":" + initial.room.emote_seq : "");
+  const key = (next: RoomView) => next.room.version + ":" + next.room.emote_seq;
 
   function accept(next: RoomView | null) {
-    version.current = next?.room.version ?? -1;
+    seen.current = next ? key(next) : "";
     setView(next);
   }
 
@@ -44,7 +48,7 @@ export function useRoom(initial: RoomView | null) {
     if (!code || !open) return;
     const timer = window.setInterval(() => {
       api<RoomView>("/api/arena/rooms/" + code)
-        .then((next) => { if (next.room.version !== version.current) accept(next); })
+        .then((next) => { if (key(next) !== seen.current) accept(next); })
         .catch(() => undefined);
     }, POLL_MS);
     return () => window.clearInterval(timer);

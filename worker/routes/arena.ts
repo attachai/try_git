@@ -4,7 +4,7 @@ import { error, json, readJson } from "../lib/http";
 import { getSessionUser, type SessionUser } from "../lib/session";
 import { thaiDay } from "./quests";
 import {
-  applyAction, ArenaError, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle,
+  applyAction, ArenaError, chooseAiAction, EMOTES, makeTeam, mvp, parentLevelFor, startBattle,
   type BattleState, type Rng, type Side,
 } from "../../shared/arena";
 import { addXp } from "../../shared/battle";
@@ -21,6 +21,8 @@ export const XP_WIN = 30;
 export const XP_LOSS = 10;
 export const XP_MVP_BONUS = 20;
 export const XP_ROOMS_PER_DAY = 5;
+export const EMOTES_KEPT = 10;
+export const EMOTE_COOLDOWN_MS = 1000;
 const OPEN_STATUSES = "('WAITING','PICKING','BATTLE')";
 
 const createSchema = z.object({
@@ -29,7 +31,8 @@ const createSchema = z.object({
   autoParent: z.boolean(),
 });
 const teamSchema = z.object({ childCharacterIds: z.array(z.string().min(1)).min(1).max(3) });
-const actionSchema = z.object({ version: z.number().int().min(0), action: z.enum(["ATTACK", "SPECIAL", "GUARD"]) });
+const emoteSchema = z.object({ emoji: z.enum(EMOTES) });
+const actionSchema = z.object({ version: z.number().int().min(0), action: z.enum(["ATTACK", "SPECIAL", "GUARD", "ULTIMATE"]) });
 
 type CharacterInfo = { id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary: string | null };
 type Room = {
@@ -38,7 +41,9 @@ type Room = {
   status: "WAITING" | "PICKING" | "BATTLE" | "FINISHED" | "CANCELLED";
   parent_team: string; state: string | null; version: number;
   winner: Side | null; reward_points: number; xp_awards: string | null;
+  emotes: string | null; emote_seq: number;
 };
+type Emote = { seq: number; side: Side; emoji: string; at: number };
 type XpAward = { name: string; gained: number; level: number; levels_gained: number };
 
 const rng: Rng = () => {
@@ -84,11 +89,13 @@ async function view(env: Env, room: Room, side: Side) {
       parent_name: names?.parent_name ?? "",
       child_name: names?.child_name ?? null,
       my_side: side,
+      emote_seq: room.emote_seq,
     },
     parent_team: JSON.parse(room.parent_team) as CharacterInfo[],
     state,
     mvp: best ? { name: best.name, damage: best.damageDealt } : null,
     xp_awards: room.xp_awards ? JSON.parse(room.xp_awards) as XpAward[] : null,
+    emotes: room.emotes ? JSON.parse(room.emotes) as Emote[] : [],
   };
 }
 
@@ -324,7 +331,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     return json(room ? await view(env, room, user.role === "PARENT" ? "PARENT" : "CHILD") : { room: null });
   }
 
-  const match = pathname.match(/^\/api\/arena\/rooms\/(\d{4})(?:\/(join|team|action|cancel))?$/);
+  const match = pathname.match(/^\/api\/arena\/rooms\/(\d{4})(?:\/(join|team|action|cancel|emote))?$/);
   if (!match) return null;
   const [, code, verb] = match;
   const room = await loadRoom(env, code);
@@ -334,6 +341,24 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
 
   if (!verb && request.method === "GET") return json(await view(env, room, side));
   if (request.method !== "POST") return null;
+
+  if (verb === "emote") {
+    if (room.status !== "BATTLE" && room.status !== "FINISHED") return error(409, "NOT_IN_BATTLE", "ยังไม่เริ่มการต่อสู้");
+    const parsed = emoteSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_EMOTE", "Unknown emoji.");
+    const emotes = room.emotes ? JSON.parse(room.emotes) as Emote[] : [];
+    const now = Date.now();
+    if (emotes.some((emote) => emote.side === side && now - emote.at < EMOTE_COOLDOWN_MS)) {
+      return error(429, "EMOTE_COOLDOWN", "ส่งเร็วไปนิด");
+    }
+    const next = [...emotes, { seq: room.emote_seq + 1, side, emoji: parsed.data.emoji, at: now }].slice(-EMOTES_KEPT);
+    // Compare-and-swap on emote_seq so two emotes at once don't overwrite each other.
+    const result = await env.DB.prepare(
+      "UPDATE arena_rooms SET emotes = ?, emote_seq = emote_seq + 1 WHERE id = ? AND emote_seq = ?",
+    ).bind(JSON.stringify(next), room.id, room.emote_seq).run();
+    if (!result.meta.changes) return error(409, "EMOTE_BUSY", "ลองอีกครั้ง");
+    return json({ emote_seq: room.emote_seq + 1 });
+  }
 
   if (verb === "cancel") {
     if (side !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
