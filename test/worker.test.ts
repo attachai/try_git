@@ -616,6 +616,22 @@ describe("arena rooms", () => {
     expect(evolved).toEqual({ level: 4, xp: 12 });
   });
 
+  it("levels the parent team to the child team's average level", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    await env.DB.prepare("UPDATE child_characters SET level = 6 WHERE id = ?").bind(owned!.id).run();
+    const { room } = await (await post("/api/arena/rooms", parent, { difficulty: "NORMAL", prize: 0, autoParent: false })).json() as View;
+    await post(`/api/arena/rooms/${room.code}/join`, kid, {});
+    const started = await (await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: [owned!.id] })).json() as {
+      state: { teams: Record<string, { fighters: { level?: number; stats: { hp: number } }[] }> };
+    };
+    const [foe] = started.state.teams.PARENT.fighters;
+    expect(foe.level).toBe(6);
+    expect(started.state.teams.CHILD.fighters[0].level).toBe(6);
+  });
+
   it("stops handing out XP after the daily room limit", async () => {
     await env.DB.prepare(
       `INSERT INTO arena_rooms (id, code, parent_user_id, child_id, difficulty, prize, status, parent_team, xp_day, xp_awards)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeFighter, applyAction, ArenaError, chooseAiAction, makeTeam, mvp, startBattle, type BattleState, type Rng } from "../shared/arena";
+import { activeFighter, applyAction, ArenaError, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle, type BattleState, type Rng } from "../shared/arena";
 
 const mon = (id: string, type_primary: string, rarity = "COMMON", type_secondary: string | null = null) =>
   ({ id, name: id, image_url: "", rarity, type_primary, type_secondary });
@@ -119,5 +119,14 @@ describe("arena engine", () => {
     expect(state.winner).not.toBeNull();
     expect(turns).toBeGreaterThan(8);
     expect(turns).toBeLessThan(60);
+  });
+});
+
+describe("parent level scaling", () => {
+  it("uses the child team's average level, rounded down", () => {
+    expect(parentLevelFor([])).toBe(1);
+    expect(parentLevelFor([1])).toBe(1);
+    expect(parentLevelFor([3, 4, 4])).toBe(3);
+    expect(parentLevelFor([10, 10, 9])).toBe(9);
   });
 });

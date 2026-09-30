@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { computeStats, typeMultiplier, weakTo } from "../../../shared/battle";
+import { parentLevelFor } from "../../../shared/arena";
 import { TYPE_INFO, TypeBadges } from "../TypeBadge";
 import BattleView from "./BattleView";
 import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
@@ -136,7 +137,12 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
               })}
             </div>
           )}
-          {picked.length > 0 && picked.length < TEAM_MAX && <p className="muted">ลงน้อยกว่า 3 ตัว ได้ HP +20% ทุกตัว</p>}
+          {picked.length > 0 && (
+            <p className="muted">
+              ทีม {view.room.parent_name} จะเป็น <span className="level-chip">Lv.{parentLevelFor(picked.map((id) => collection.find((monster) => monster.child_character_id === id)?.level ?? 1))}</span> ตามเลเวลเฉลี่ยทีมคุณ
+              {picked.length < TEAM_MAX ? " · ลงน้อยกว่า 3 ตัว ได้ HP +20% ทุกตัว" : ""}
+            </p>
+          )}
           <button className="submit-button earn arena-start" disabled={busy || picked.length === 0} onClick={startFight}>
             {busy ? "กำลังเริ่ม..." : "⚔️ เริ่มสู้! (" + picked.length + " ตัว)"}
           </button>
