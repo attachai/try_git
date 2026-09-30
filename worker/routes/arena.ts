@@ -4,7 +4,8 @@ import { error, json, readJson } from "../lib/http";
 import { getSessionUser, type SessionUser } from "../lib/session";
 import { thaiDay } from "./quests";
 import {
-  applyAction, ArenaError, chooseAiAction, EMOTES, makeTeam, mvp, parentLevelFor, startBattle,
+  aiTurn, applyAction, ArenaError, EMOTES, ITEMS, makeTeam, mvp, parentLevelFor, rollWeather, startBattle, WEATHER_KINDS,
+  type ItemKind, type WeatherKind,
   type BattleState, type Rng, type Side,
 } from "../../shared/arena";
 import { addXp } from "../../shared/battle";
@@ -30,9 +31,16 @@ const createSchema = z.object({
   prize: z.number().int().min(0).max(200),
   autoParent: z.boolean(),
 });
-const teamSchema = z.object({ childCharacterIds: z.array(z.string().min(1)).min(1).max(3) });
+const teamSchema = z.object({
+  childCharacterIds: z.array(z.string().min(1)).min(1).max(3),
+  item: z.enum(Object.keys(ITEMS) as [ItemKind, ...ItemKind[]]).nullable().optional(),
+});
 const emoteSchema = z.object({ emoji: z.enum(EMOTES) });
-const actionSchema = z.object({ version: z.number().int().min(0), action: z.enum(["ATTACK", "SPECIAL", "GUARD", "ULTIMATE"]) });
+const actionSchema = z.object({
+  version: z.number().int().min(0),
+  action: z.enum(["ATTACK", "SPECIAL", "GUARD", "ULTIMATE", "SWITCH", "ITEM"]),
+  target: z.number().int().min(0).max(2).optional(),
+});
 
 type CharacterInfo = { id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary: string | null };
 type Room = {
@@ -41,7 +49,7 @@ type Room = {
   status: "WAITING" | "PICKING" | "BATTLE" | "FINISHED" | "CANCELLED";
   parent_team: string; state: string | null; version: number;
   winner: Side | null; reward_points: number; xp_awards: string | null;
-  emotes: string | null; emote_seq: number;
+  emotes: string | null; emote_seq: number; weather: WeatherKind | null;
 };
 type Emote = { seq: number; side: Side; emoji: string; at: number };
 type XpAward = { name: string; gained: number; level: number; levels_gained: number };
@@ -90,6 +98,7 @@ async function view(env: Env, room: Room, side: Side) {
       child_name: names?.child_name ?? null,
       my_side: side,
       emote_seq: room.emote_seq,
+      weather: room.weather ?? "CLEAR",
     },
     parent_team: JSON.parse(room.parent_team) as CharacterInfo[],
     state,
@@ -171,6 +180,21 @@ async function awardXp(env: Env, room: Room, state: BattleState) {
     updates.push(env.DB.prepare("UPDATE arena_rooms SET xp_awards = ? WHERE id = ?").bind(JSON.stringify(awards), room.id));
   }
   if (updates.length > 0) await env.DB.batch(updates);
+}
+
+async function chargeItem(env: Env, room: Room, userId: string, kind: ItemKind) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO point_transactions
+         (id, child_id, created_by, transaction_type, points, reason, reference_type, reference_id)
+       VALUES (?, ?, ?, 'PURCHASE', ?, ?, 'ARENA_ITEM', ?)`,
+    ).bind(crypto.randomUUID(), room.child_id, userId, -ITEMS[kind].price, "⚔️ ใช้ " + ITEMS[kind].icon + " " + ITEMS[kind].label + " ใน Arena", room.id).run();
+  } catch (cause) {
+    // Already charged for this room, or the balance dropped since the check: the item stays used.
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (message.includes("UNIQUE constraint failed") || message.includes("INSUFFICIENT_POINTS")) return;
+    throw cause;
+  }
 }
 
 async function saveState(env: Env, room: Room, state: BattleState) {
@@ -295,9 +319,9 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
       const id = crypto.randomUUID();
       try {
         await env.DB.prepare(
-          `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team)
-           VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?)`,
-        ).bind(id, code, user.id, parsed.data.difficulty, parsed.data.prize, parsed.data.autoParent ? 1 : 0, JSON.stringify(team)).run();
+          `INSERT INTO arena_rooms (id, code, parent_user_id, difficulty, prize, auto_parent, status, parent_team, weather)
+           VALUES (?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)`,
+        ).bind(id, code, user.id, parsed.data.difficulty, parsed.data.prize, parsed.data.autoParent ? 1 : 0, JSON.stringify(team), rollWeather(rng)).run();
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         if (message.includes("UNIQUE constraint failed")) continue;
@@ -394,7 +418,10 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
 
     const parentLevel = parentLevelFor(ordered.map((monster) => monster.level));
     const parentTeam = (JSON.parse(room.parent_team) as CharacterInfo[]).map((monster) => ({ ...monster, level: parentLevel }));
-    const state = startBattle(makeTeam(ordered), makeTeam(parentTeam, DIFFICULTY[room.difficulty].scale));
+    const childTeam = makeTeam(ordered);
+    if (parsed.data.item) childTeam.item = { kind: parsed.data.item, used: false };
+    const weather = room.weather && (WEATHER_KINDS as string[]).includes(room.weather) ? room.weather : "CLEAR";
+    const state = startBattle(childTeam, makeTeam(parentTeam, DIFFICULTY[room.difficulty].scale), weather);
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     return json(await view(env, (await loadRoom(env, code))!, side));
   }
@@ -406,12 +433,19 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     if (parsed.data.version !== room.version) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
     if (side === "PARENT" && room.auto_parent) return error(409, "AUTO_PARENT", "ห้องนี้ให้ระบบเล่นแทนผู้ปกครอง");
 
+    // Items are paid for when used: check the balance up front, charge after the move is saved.
+    const itemKind = parsed.data.action === "ITEM" ? (JSON.parse(room.state) as BattleState).teams[side].item?.kind : undefined;
+    if (itemKind) {
+      const balance = await env.DB.prepare("SELECT points_balance FROM children WHERE id = ?").bind(room.child_id).first<{ points_balance: number }>();
+      if ((balance?.points_balance ?? 0) < ITEMS[itemKind].price) return error(409, "INSUFFICIENT_POINTS", "แต้มไม่พอใช้ไอเทม");
+    }
+
     let state: BattleState;
     try {
-      state = applyAction(JSON.parse(room.state) as BattleState, side, parsed.data.action, rng);
+      state = applyAction(JSON.parse(room.state) as BattleState, side, parsed.data.action, rng, parsed.data.target);
       // With "let the system play", the parent's reply happens in the same request.
       if (room.auto_parent && !state.winner && state.turn === "PARENT") {
-        state = applyAction(state, "PARENT", chooseAiAction(state, "PARENT", rng), rng);
+        state = aiTurn(state, "PARENT", rng);
       }
     } catch (cause) {
       if (cause instanceof ArenaError) return error(409, "INVALID_ACTION", cause.message);
@@ -419,6 +453,7 @@ export async function arenaRoutes(request: Request, env: Env, pathname: string) 
     }
 
     if (!(await saveState(env, room, state))) return error(409, "STALE", "มีการเปลี่ยนแปลง ลองใหม่อีกครั้ง");
+    if (itemKind) await chargeItem(env, room, user.id, itemKind);
     if (state.winner) {
       await reward(env, room, state.winner);
       await awardXp(env, room, state);

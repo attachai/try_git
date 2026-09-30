@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { computeStats, typeMultiplier, weakTo } from "../../../shared/battle";
-import { parentLevelFor } from "../../../shared/arena";
+import { ITEMS, parentLevelFor, WEATHER, weatherMultiplier, type ItemKind } from "../../../shared/arena";
 import { TYPE_INFO, TypeBadges } from "../TypeBadge";
 import ArenaHistory from "./ArenaHistory";
 import BattleView from "./BattleView";
@@ -16,14 +16,17 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
   const { view, setView } = useRoom(null);
   const [code, setCode] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [item, setItem] = useState<ItemKind | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  // Refresh points once the battle ends, whoever landed the final hit.
+  // Refresh points once the battle ends, whoever landed the final hit, and after
+  // using an item (it's paid for when used).
   const finished = view?.room.status === "FINISHED";
+  const itemUsed = Boolean(view?.state?.teams.CHILD.item?.used);
   useEffect(() => {
-    if (finished) onFinished().catch(() => undefined);
-  }, [finished]);
+    if (finished || itemUsed) onFinished().catch(() => undefined);
+  }, [finished, itemUsed]);
 
   useEffect(() => {
     api<RoomView | { room: null }>("/api/arena/rooms/current")
@@ -59,7 +62,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
     if (!view) return;
     run(() => api<RoomView>("/api/arena/rooms/" + view.room.code + "/team", {
       method: "POST",
-      body: JSON.stringify({ childCharacterIds: picked }),
+      body: JSON.stringify({ childCharacterIds: picked, item }),
     })).catch(() => undefined);
   }
 
@@ -115,6 +118,17 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
         </section>
 
         <section className="panel">
+          <div className={"arena-field field-" + view.room.weather.toLowerCase()}>
+            <span>สนามวันนี้: {WEATHER[view.room.weather].icon} {WEATHER[view.room.weather].label}</span>
+            <small>
+              {WEATHER[view.room.weather].boost.length ? "ช่วย " + WEATHER[view.room.weather].boost.map((type) => TYPE_INFO[type]?.icon).join("") + " +20%" : "ไม่มีผลกับธาตุ"}
+              {WEATHER[view.room.weather].weaken.length ? " · กด " + WEATHER[view.room.weather].weaken.map((type) => TYPE_INFO[type]?.icon).join("") + " −20%" : ""}
+              {" · เปลี่ยนทุก 4 รอบ"}
+            </small>
+          </div>
+        </section>
+
+        <section className="panel">
           <div className="section-heading"><h2>เลือกทีม</h2><span>แตะเรียงลำดับ 1-2-3</span></div>
           {collection.length === 0 ? <p className="muted">ยังไม่มีตัวละคร ไปหาจากร้านก่อนนะ</p> : (
             <div className="arena-pick-grid">
@@ -123,6 +137,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
                 const beats = foes.filter((foe) => typeMultiplier(monster.type_primary, foe) > 1);
                 const threats = foes.filter((foe) => typeMultiplier(foe.type_primary, monster) > 1);
                 const stats = computeStats(monster);
+                const field = weatherMultiplier(view.room.weather, monster.type_primary);
                 return (
                   <button
                     key={monster.child_character_id}
@@ -136,6 +151,7 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
                     <small>❤️{stats.hp} ⚔️{stats.atk} 🛡️{stats.def}</small>
                     {beats.length > 0 && <small className="arena-good">💪 ชนะ {beats.map((foe) => foe.name).join(", ")}</small>}
                     {threats.length > 0 && <small className="arena-bad">⚠️ แพ้ {threats.map((foe) => foe.name).join(", ")}</small>}
+                    {field !== 1 && <small className={field > 1 ? "arena-good" : "arena-bad"}>{WEATHER[view.room.weather].icon} สนาม{field > 1 ? "ช่วย" : "กด"} ×{field}</small>}
                   </button>
                 );
               })}
@@ -147,6 +163,16 @@ export default function ArenaChild({ collection, onBack, onFinished }: Props) {
               {picked.length < TEAM_MAX ? " · ลงน้อยกว่า 3 ตัว ได้ HP +20% ทุกตัว" : ""}
             </p>
           )}
+          <p className="arena-label">🎒 พกไอเทม 1 ชิ้น (จ่ายแต้มเมื่อใช้)</p>
+          <div className="arena-items">
+            <button className={item === null ? "active" : ""} onClick={() => setItem(null)}>ไม่พก</button>
+            {(Object.keys(ITEMS) as ItemKind[]).map((kind) => (
+              <button key={kind} className={item === kind ? "active" : ""} onClick={() => setItem(kind)}>
+                <strong>{ITEMS[kind].icon} {ITEMS[kind].label}</strong>
+                <small>{ITEMS[kind].detail} · ⭐{ITEMS[kind].price}</small>
+              </button>
+            ))}
+          </div>
           <button className="submit-button earn arena-start" disabled={busy || picked.length === 0} onClick={startFight}>
             {busy ? "กำลังเริ่ม..." : "⚔️ เริ่มสู้! (" + picked.length + " ตัว)"}
           </button>

@@ -665,6 +665,52 @@ describe("arena rooms", () => {
     expect((await post(`/api/arena/rooms/${code}/action`, kid, { version: view.room.version, action: "ATTACK" })).status).toBe(200);
   });
 
+  it("shows the field while picking, and charges an item once when used", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    const { room } = await (await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: true })).json() as View & { room: { weather: string } };
+    const picking = await (await post(`/api/arena/rooms/${room.code}/join`, kid, {})).json() as { room: { weather: string } };
+    expect(["CLEAR", "SUN", "RAIN", "STORM", "SNOW", "SAND"]).toContain(picking.room.weather);
+
+    const started = await (await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: [owned!.id], item: "POTION" })).json() as View & {
+      state: { weather: string; teams: Record<string, { item?: { kind: string; used: boolean } }> };
+    };
+    expect(started.state.weather).toBe(picking.room.weather);
+    expect(started.state.teams.CHILD.item).toEqual({ kind: "POTION", used: false });
+
+    const before = (await env.DB.prepare("SELECT points_balance FROM children WHERE id = 'child'").first<{ points_balance: number }>())!.points_balance;
+    const used = await post(`/api/arena/rooms/${room.code}/action`, kid, { version: started.room.version, action: "ITEM" });
+    expect(used.status).toBe(200);
+    const after = await used.json() as View & { state: { teams: Record<string, { item?: { used: boolean } }> } };
+    expect(after.state.teams.CHILD.item?.used).toBe(true);
+    const balance = (await env.DB.prepare("SELECT points_balance FROM children WHERE id = 'child'").first<{ points_balance: number }>())!.points_balance;
+    expect(balance).toBe(before - 60);
+    expect((await post(`/api/arena/rooms/${room.code}/action`, kid, { version: after.room.version, action: "ITEM" })).status).toBe(409);
+  });
+
+  it("refuses an item the child can't afford and switches through the API", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await env.DB.prepare("INSERT INTO characters (id, name, slug, type_primary, image_url, price, rarity) VALUES ('second', 'Second', 'second', 'Water', 'x', 100, 'COMMON')").run();
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    await post("/api/shop/purchase", kid, { characterId: "second" });
+    const ids = (await env.DB.prepare("SELECT id FROM child_characters WHERE child_id = 'child' ORDER BY character_id DESC").all<{ id: string }>()).results.map((r) => r.id);
+    const { room } = await (await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: false })).json() as View;
+    await post(`/api/arena/rooms/${room.code}/join`, kid, {});
+    const started = await (await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: ids, item: "ETHER" })).json() as View;
+
+    await env.DB.prepare("UPDATE children SET points_balance = 10 WHERE id = 'child'").run();
+    expect((await post(`/api/arena/rooms/${room.code}/action`, kid, { version: started.room.version, action: "ITEM" })).status).toBe(409);
+
+    const switched = await post(`/api/arena/rooms/${room.code}/action`, kid, { version: started.room.version, action: "SWITCH", target: 1 });
+    expect(switched.status).toBe(200);
+    const view = await switched.json() as { state: { teams: Record<string, { active: number }> } };
+    expect(view.state.teams.CHILD.active).toBe(1);
+    expect((await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: ids, item: "BOGUS" })).status).toBe(409);
+  });
+
   it("validates room settings", async () => {
     const parent = await sessionCookie("parent");
     expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 500, autoParent: false })).status).toBe(400);

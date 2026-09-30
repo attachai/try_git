@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeFighter, applyAction, ArenaError, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle, type BattleState, type Rng } from "../shared/arena";
+import { activeFighter, aiSwitchTarget, aiTurn, applyAction, ArenaError, chooseAiAction, makeTeam, mvp, parentLevelFor, startBattle, type BattleState, type Rng } from "../shared/arena";
 
 const mon = (id: string, type_primary: string, rarity = "COMMON", type_secondary: string | null = null) =>
   ({ id, name: id, image_url: "", rarity, type_primary, type_secondary });
@@ -163,6 +163,7 @@ describe("battle events", () => {
 
   it("keeps only the latest events", () => {
     let state = battle([mon("Onix", "Rock")], [mon("Onix2", "Rock")]);
+    delete state.weatherUntil; // keep the field fixed so only guard events count
     for (let i = 0; i < 50; i++) state = applyAction(state, state.turn, "GUARD", steady);
     expect(state.events!.length).toBe(40);
     expect(state.eventSeq).toBe(50);
@@ -207,5 +208,76 @@ describe("ultimate", () => {
     state = applyAction(state, "CHILD", "GUARD", steady);
     state = applyAction(state, "PARENT", "ULTIMATE", steady);
     expect(state.log.join("\n")).toContain("ลดครึ่ง");
+  });
+});
+
+describe("field, combos, switching, items", () => {
+  const dealt = (s: BattleState) => activeFighter(s, "PARENT").stats.hp - activeFighter(s, "PARENT").hp;
+
+  it("boosts and weakens by field and changes the field every 4 rounds", () => {
+    const hitIn = (weather: "CLEAR" | "SUN" | "RAIN") =>
+      dealt(applyAction(startBattle(makeTeam([mon("Charmander", "Fire")]), makeTeam([mon("Onix", "Normal")]), weather), "CHILD", "ATTACK", steady));
+    expect(hitIn("SUN") / hitIn("CLEAR")).toBeCloseTo(1.2, 1);
+    expect(hitIn("RAIN") / hitIn("CLEAR")).toBeCloseTo(0.8, 1);
+
+    let state = startBattle(makeTeam([mon("A", "Rock")]), makeTeam([mon("B", "Rock")]), "SUN");
+    for (let i = 0; i < 8; i++) state = applyAction(state, state.turn, "GUARD", () => 0.5);
+    expect(state.round).toBe(5);
+    expect(state.weather).not.toBe("SUN");
+    expect(state.weatherUntil).toBe(9);
+    expect(state.events!.at(-1)).toMatchObject({ kind: "weather", weather: state.weather });
+  });
+
+  it("marks with water, then shocks with electric for a combo", () => {
+    let state = battle([mon("Squirtle", "Water"), mon("Pikachu", "Electric")], [mon("Onix", "Normal")]);
+    state = applyAction(state, "CHILD", "ATTACK", steady);
+    expect(activeFighter(state, "PARENT").statuses.map((s) => s.kind)).toContain("WET");
+    state = applyAction(state, "PARENT", "GUARD", steady); // WET ticks down to 1
+    state = applyAction(state, "CHILD", "SWITCH", steady, 1);
+    expect(activeFighter(state, "CHILD").name).toBe("Pikachu");
+    expect(state.events!.slice(-2).map((e) => e.kind)).toEqual(["recall", "switch"]);
+    state = applyAction(state, "PARENT", "ATTACK", steady);
+    // WET expired at the end of the parent's second turn, so re-apply it to test the shock.
+    state.teams.PARENT.fighters[0].statuses = [{ kind: "WET", turns: 2 }];
+    state = applyAction(state, "CHILD", "ATTACK", steady);
+    expect(state.events!.some((e) => e.kind === "combo" && e.combo?.includes("ช็อตไฟฟ้า"))).toBe(true);
+    expect(activeFighter(state, "PARENT").statuses.map((s) => s.kind)).not.toContain("WET");
+  });
+
+  it("shatters a frozen target for a guaranteed crit", () => {
+    const state = battle([mon("Onix", "Rock")], [mon("Mew", "Normal")]);
+    state.teams.PARENT.fighters[0].statuses = [{ kind: "FREEZE", turns: 2 }];
+    const after = applyAction(state, "CHILD", "ATTACK", steady);
+    expect(after.events!.find((e) => e.kind === "hit")).toMatchObject({ crit: true });
+    expect(after.log.at(-1)).toContain("แตกกระจาย");
+  });
+
+  it("rejects bad switches and lets a paralyzed monster switch out", () => {
+    const state = battle([mon("A", "Water"), mon("B", "Fire")], [mon("C", "Rock")]);
+    expect(() => applyAction(state, "CHILD", "SWITCH", steady, 0)).toThrow("ตัวสำรอง");
+    expect(() => applyAction(state, "CHILD", "SWITCH", steady, 5)).toThrow("ตัวสำรอง");
+    state.teams.CHILD.fighters[0].statuses = [{ kind: "PARALYZE", turns: 2 }];
+    expect(applyAction(state, "CHILD", "SWITCH", () => 0, 1).teams.CHILD.active).toBe(1);
+  });
+
+  it("uses a carried item once", () => {
+    const state = battle([mon("Squirtle", "Water")], [mon("Onix", "Rock")]);
+    expect(() => applyAction(state, "CHILD", "ITEM", steady)).toThrow("ไม่มีไอเทม");
+    state.teams.CHILD.item = { kind: "POTION", used: false };
+    state.teams.CHILD.fighters[0].hp = 10;
+    const after = applyAction(state, "CHILD", "ITEM", steady);
+    const squirtle = activeFighter(after, "CHILD");
+    expect(squirtle.hp).toBe(10 + Math.round(squirtle.stats.hp * 0.3));
+    expect(after.teams.CHILD.item).toEqual({ kind: "POTION", used: true });
+    const back = applyAction(after, "PARENT", "GUARD", steady);
+    expect(() => applyAction(back, "CHILD", "ITEM", steady)).toThrow("ไม่มีไอเทม");
+  });
+
+  it("has the AI switch away from a bad matchup", () => {
+    const state = battle([mon("Squirtle", "Water")], [mon("Charmander", "Fire"), mon("Bulbasaur", "Grass")]);
+    state.turn = "PARENT";
+    expect(aiSwitchTarget(state, "PARENT")).toBe(1);
+    const after = aiTurn(state, "PARENT", () => 0.1);
+    expect(after.teams.PARENT.active).toBe(1);
   });
 });

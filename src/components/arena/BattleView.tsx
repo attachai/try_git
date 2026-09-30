@@ -3,11 +3,13 @@ import { usePlayback, type Display, type Float } from "./usePlayback";
 import { isMuted, setMuted, sfx } from "./sound";
 import { api } from "../../lib/api";
 import {
-  activeFighter, EMOTES, ENERGY_MAX, other, SPECIAL_COST, SPECIALS, STATUS_INFO, ULT_MAX, ULTIMATE_NAMES, ULTIMATE_POWER, ultOf,
+  activeFighter, COMBOS, EMOTES, ENERGY_MAX, ITEMS, other, SPECIAL_COST, SPECIALS, STATUS_INFO, ULT_MAX, ULTIMATE_NAMES, ULTIMATE_POWER, ultOf,
+  WEATHER, weatherMultiplier,
   type Action, type Fighter, type Side, type Team,
 } from "../../../shared/arena";
 import { typeMultiplier } from "../../../shared/battle";
 import { TypeBadges } from "../TypeBadge";
+import { TYPE_ICON } from "../../../shared/types";
 import type { RoomView } from "./useRoom";
 
 const LOG_SHOWN = 6;
@@ -109,6 +111,14 @@ export default function BattleView({ view, onView }: Props) {
   const canAct = myTurn && !playing && intro < 0;
   const finished = Boolean(state.winner) && !playing;
   const ultReady = ultOf(state.teams[me]) >= ULT_MAX;
+  const [choosingSwitch, setChoosingSwitch] = useState(false);
+  const myTeam = state.teams[me];
+  const bench = myTeam.fighters.map((fighter, index) => ({ fighter, index })).filter(({ fighter, index }) => index !== myTeam.active && fighter.hp > 0);
+  const item = myTeam.item && !myTeam.item.used ? ITEMS[myTeam.item.kind] : null;
+  const field = WEATHER[state.weather ?? "CLEAR"];
+  const fieldBonus = weatherMultiplier(state.weather, myFighter.type_primary);
+  // A combo my current monster can land right now.
+  const readyCombo = COMBOS.find((combo) => combo.types.includes(myFighter.type_primary) && foeFighter.statuses.some((status) => status.kind === combo.needs));
 
   // Intro: step through the beats once per room per device.
   useEffect(() => {
@@ -157,14 +167,15 @@ export default function BattleView({ view, onView }: Props) {
     setMutedState(!muted);
   }
 
-  async function act(action: Action) {
+  async function act(action: Action, target?: number) {
     if (busy) return;
     try {
       setBusy(true);
       setMessage("");
+      setChoosingSwitch(false);
       const next = await api<RoomView>("/api/arena/rooms/" + view.room.code + "/action", {
         method: "POST",
-        body: JSON.stringify({ version: view.room.version, action }),
+        body: JSON.stringify({ version: view.room.version, action, target }),
       });
       onView(next);
     } catch (error) {
@@ -185,7 +196,16 @@ export default function BattleView({ view, onView }: Props) {
         </span>
       </div>
 
-      <div className={"arena-stage " + fx.screen + (danger ? " danger" : "")}>
+      <div className={"arena-field field-" + (state.weather ?? "CLEAR").toLowerCase()}>
+        <span>{field.icon} {field.label}</span>
+        <small>
+          {field.boost.length ? "ช่วย " + field.boost.map((type) => TYPE_ICON[type]).join("") + " +20%" : "ไม่มีผลกับธาตุ"}
+          {field.weaken.length ? " · กด " + field.weaken.map((type) => TYPE_ICON[type]).join("") + " −20%" : ""}
+          {state.weatherUntil ? " · เปลี่ยนในอีก " + Math.max(1, state.weatherUntil - state.round) + " รอบ" : ""}
+        </small>
+      </div>
+
+      <div className={"arena-stage " + fx.screen + (danger ? " danger" : "") + " stage-" + (state.weather ?? "CLEAR").toLowerCase()}>
         {intro >= 0 && intro < INTRO.length && (
           <div className="arena-intro" aria-live="assertive">
             {intro === 0 ? (
@@ -256,6 +276,12 @@ export default function BattleView({ view, onView }: Props) {
         <p className="muted">ระบบกำลังเล่นแทนคุณ ดูการต่อสู้ได้เลย</p>
       ) : (
         <>
+          {canAct && readyCombo && (
+            <p className="arena-hint combo">🔗 คอมโบพร้อม! ตี {foeFighter.name} ตอนนี้ได้ {readyCombo.name}</p>
+          )}
+          {canAct && fieldBonus !== 1 && (
+            <p className={"arena-hint" + (fieldBonus > 1 ? " good" : " bad")}>{field.icon} สนาม{fieldBonus > 1 ? "ช่วย" : "กด"} {myFighter.name} ×{fieldBonus}</p>
+          )}
           {canAct && advantage !== 1 && (
             <p className={"arena-hint" + (advantage > 1 ? " good" : " bad")}>
               {advantage > 1 ? "💡 ได้เปรียบธาตุ ×" + advantage + " ตีแรงขึ้น!" : "⚠️ แพ้ทางธาตุ ×" + advantage + " ลองใช้ท่าพิเศษหรือตั้งรับ"}
@@ -281,6 +307,39 @@ export default function BattleView({ view, onView }: Props) {
               <strong>🛡️ ตั้งรับ</strong><small>ลดครึ่ง · ⚡+1</small>
             </button>
           </div>
+          {(bench.length > 0 || item) && (
+            <div className="arena-secondary">
+              {bench.length > 0 && (
+                <button disabled={!canAct || busy} className={choosingSwitch ? "active" : ""} onClick={() => setChoosingSwitch(!choosingSwitch)}>
+                  🔄 สลับตัว
+                </button>
+              )}
+              {item && (
+                <button disabled={!canAct || busy} onClick={() => act("ITEM")}>
+                  {item.icon} {item.label} <small>{item.detail} · ⭐{item.price} จ่ายเมื่อใช้</small>
+                </button>
+              )}
+            </div>
+          )}
+          {choosingSwitch && canAct && (
+            <div className="arena-bench-pick">
+              {bench.map(({ fighter, index }) => {
+                const risk = typeMultiplier(foeFighter.type_primary, fighter);
+                const edge = typeMultiplier(fighter.type_primary, foeFighter);
+                return (
+                  <button key={index} disabled={busy} onClick={() => act("SWITCH", index)}>
+                    <img src={fighter.image_url} alt="" />
+                    <span>
+                      <strong>{fighter.name}</strong>
+                      <small>❤️ {fighter.hp}/{fighter.stats.hp}</small>
+                      {edge > 1 && <small className="arena-good">💪 ชนะทาง ×{edge}</small>}
+                      {risk > 1 && <small className="arena-bad">⚠️ แพ้ทาง ×{risk}</small>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {!myTurn && !playing && <p className="muted arena-waiting">รอ{SIDE_LABEL[state.turn]}เลือกท่า...</p>}
         </>
       )}

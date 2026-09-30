@@ -4,10 +4,11 @@ import { baseDamage, computeStats, typeMultiplier, type Stats } from "./battle";
 import { TYPE_ICON } from "./types";
 
 export type Side = "CHILD" | "PARENT";
-export type Action = "ATTACK" | "SPECIAL" | "GUARD" | "ULTIMATE";
+export type Action = "ATTACK" | "SPECIAL" | "GUARD" | "ULTIMATE" | "SWITCH" | "ITEM";
 export type StatusKind =
   | "BURN" | "POISON" | "PARALYZE" | "FREEZE" | "FEAR" | "CONFUSE" // on the target
-  | "RAGE" | "ARMOR" | "SWIFT" | "EXPOSED"; // on self
+  | "RAGE" | "ARMOR" | "SWIFT" | "EXPOSED" // on self
+  | "WET" | "GRASSY"; // combo marks left by Water and Grass hits
 
 export type Status = { kind: StatusKind; turns: number };
 export type Fighter = {
@@ -27,12 +28,17 @@ export type Fighter = {
   damageDealt: number;
 };
 // `ult` is the ultimate gauge (0–ULT_MAX); optional so older battles still load.
-export type Team = { fighters: Fighter[]; active: number; energy: number; ult?: number };
+export type ItemKind = "POTION" | "ETHER" | "CLEANSE";
+export type WeatherKind = "CLEAR" | "SUN" | "RAIN" | "STORM" | "SNOW" | "SAND";
+// `ult` is the ultimate gauge (0–ULT_MAX); `item` is the child's one carried item.
+// Both optional so older battles still load.
+export type Team = { fighters: Fighter[]; active: number; energy: number; ult?: number; item?: { kind: ItemKind; used: boolean } };
 // Structured record of what happened, so the UI can animate each beat in order.
 // `side` is who the event happens to; `index` is that fighter's slot in the team.
 export type BattleEvent = {
   seq: number;
-  kind: "attack" | "special" | "ultimate" | "hit" | "miss" | "heal" | "status" | "buff" | "tick" | "guard" | "paralyzed" | "faint" | "switch" | "win";
+  kind: "attack" | "special" | "ultimate" | "hit" | "miss" | "heal" | "status" | "buff" | "tick" | "guard" | "paralyzed"
+    | "faint" | "switch" | "win" | "weather" | "combo" | "item" | "recall";
   side: Side;
   index: number;
   hp?: number;
@@ -44,6 +50,9 @@ export type BattleEvent = {
   type?: string;
   move?: string;
   status?: StatusKind;
+  weather?: WeatherKind;
+  combo?: string;
+  item?: ItemKind;
 };
 export type BattleState = {
   turn: Side;
@@ -54,6 +63,8 @@ export type BattleState = {
   // Optional so battles saved before events existed still load.
   events?: BattleEvent[];
   eventSeq?: number;
+  weather?: WeatherKind;
+  weatherUntil?: number; // round at which the field changes next
 };
 export type Rng = () => number;
 
@@ -96,6 +107,8 @@ export const STATUS_INFO: Record<StatusKind, { icon: string; label: string }> = 
   ARMOR: { icon: "🛡️", label: "เกราะ" },
   SWIFT: { icon: "💨", label: "ว่องไว" },
   EXPOSED: { icon: "🎯", label: "เปิดช่อง" },
+  WET: { icon: "💧", label: "เปียก" },
+  GRASSY: { icon: "🌿", label: "หญ้าคลุม" },
 };
 
 // Special move per primary type: its name, power, and what it does.
@@ -130,7 +143,52 @@ export const SPECIALS: Record<string, Special> = {
   Normal: { name: "ทุ่มสุดตัว", power: 2.0, self: { kind: "EXPOSED", turns: 1 } },
 };
 
-const BAD_STATUSES: StatusKind[] = ["BURN", "POISON", "PARALYZE", "FREEZE", "FEAR", "CONFUSE"];
+const BAD_STATUSES: StatusKind[] = ["BURN", "POISON", "PARALYZE", "FREEZE", "FEAR", "CONFUSE", "WET", "GRASSY"];
+
+// Field conditions: the attacker's primary type gets ×WEATHER_BOOST or ×WEATHER_WEAKEN.
+export const WEATHER_BOOST = 1.2;
+export const WEATHER_WEAKEN = 0.8;
+export const WEATHER_ROUNDS = 4;
+export const WEATHER: Record<WeatherKind, { icon: string; label: string; boost: string[]; weaken: string[] }> = {
+  CLEAR: { icon: "🌤️", label: "ฟ้าใส", boost: [], weaken: [] },
+  SUN: { icon: "☀️", label: "แดดจ้า", boost: ["Fire"], weaken: ["Water"] },
+  RAIN: { icon: "🌧️", label: "ฝนตก", boost: ["Water"], weaken: ["Fire"] },
+  STORM: { icon: "⛈️", label: "พายุฟ้าคะนอง", boost: ["Electric", "Flying"], weaken: [] },
+  SNOW: { icon: "❄️", label: "หิมะตก", boost: ["Ice"], weaken: ["Grass"] },
+  SAND: { icon: "🏜️", label: "พายุทราย", boost: ["Rock", "Ground", "Steel"], weaken: ["Electric"] },
+};
+export const WEATHER_KINDS = Object.keys(WEATHER) as WeatherKind[];
+
+export function weatherMultiplier(weather: WeatherKind | undefined, attackType: string) {
+  const field = WEATHER[weather ?? "CLEAR"];
+  if (field.boost.includes(attackType)) return WEATHER_BOOST;
+  if (field.weaken.includes(attackType)) return WEATHER_WEAKEN;
+  return 1;
+}
+
+export function rollWeather(rng: Rng, not?: WeatherKind): WeatherKind {
+  const options = WEATHER_KINDS.filter((kind) => kind !== not);
+  return options[Math.floor(rng() * options.length)] ?? "CLEAR";
+}
+
+// Element combos: a mark (or status) on the defender plus the right attack type.
+export const COMBO_MULTIPLIER = 1.3;
+export const MARK_TURNS = 2;
+type Combo = { name: string; needs: StatusKind; types: string[]; multiplier?: number; crit?: boolean; burn?: boolean; consume: boolean };
+export const COMBOS: Combo[] = [
+  { name: "⚡💧 ช็อตไฟฟ้า", needs: "WET", types: ["Electric"], multiplier: COMBO_MULTIPLIER, consume: true },
+  { name: "❄️💥 แตกกระจาย", needs: "FREEZE", types: ["Rock", "Fighting", "Steel"], crit: true, consume: true },
+  { name: "🌿🔥 ไฟลาม", needs: "GRASSY", types: ["Fire"], multiplier: 1.1, burn: true, consume: true },
+  { name: "🔥🌪️ พายุไฟ", needs: "BURN", types: ["Flying"], multiplier: COMBO_MULTIPLIER, consume: false },
+];
+const MARK_FROM: Partial<Record<string, StatusKind>> = { Water: "WET", Grass: "GRASSY" };
+
+// One carried item per battle for the child; using it takes the turn.
+export const ITEMS: Record<ItemKind, { icon: string; label: string; detail: string; price: number }> = {
+  POTION: { icon: "🧪", label: "ยาฟื้น HP", detail: "ฟื้น HP 30%", price: 60 },
+  ETHER: { icon: "🔋", label: "ยาพลัง", detail: "⚡ +2", price: 50 },
+  CLEANSE: { icon: "✨", label: "ยาล้างสถานะ", detail: "ล้างสถานะไม่ดี + ฟื้น 10%", price: 40 },
+};
 const DOT: Partial<Record<StatusKind, number>> = { BURN: 0.08, POISON: 0.06 };
 const PARALYZE_SKIP = 0.25;
 
@@ -166,8 +224,11 @@ export function parentLevelFor(childLevels: number[]) {
   return Math.max(1, Math.floor(childLevels.reduce((sum, level) => sum + level, 0) / childLevels.length));
 }
 
-export function startBattle(child: Team, parent: Team): BattleState {
-  const state: BattleState = { turn: "CHILD", round: 1, teams: { CHILD: child, PARENT: parent }, log: [], winner: null };
+export function startBattle(child: Team, parent: Team, weather: WeatherKind = "CLEAR"): BattleState {
+  const state: BattleState = {
+    turn: "CHILD", round: 1, teams: { CHILD: child, PARENT: parent }, log: [], winner: null,
+    weather, weatherUntil: 1 + WEATHER_ROUNDS,
+  };
   push(state, "⚔️ เริ่มการต่อสู้! " + child.fighters[0].name + " ปะทะ " + parent.fighters[0].name);
   return state;
 }
@@ -254,10 +315,13 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, 
   }
 
   const multiplier = typeMultiplier(attacker.type_primary, defender);
-  const crit = rng() * 100 < effectiveCrit(attacker);
+  const combo = COMBOS.find((entry) => entry.types.includes(attacker.type_primary) && has(defender, entry.needs));
+  const crit = rng() * 100 < effectiveCrit(attacker) || Boolean(combo?.crit);
   const def = special?.pierce ? 0 : effectiveDef(defender);
   let damage = baseDamage(effectiveAtk(state, side, attacker), def, multiplier, rng(), crit);
   if (special) damage = Math.round(damage * (ultimate ? ULTIMATE_POWER : special.power));
+  const field = weatherMultiplier(state.weather, attacker.type_primary);
+  damage = Math.round(damage * field * (combo?.multiplier ?? 1));
   let guarded = false;
   if (defender.guard) {
     damage = Math.max(1, Math.round(damage / 2));
@@ -271,8 +335,17 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng, 
   if (!ultimate) gainUlt(state.teams[side], ULT_ON_HIT);
   gainUlt(state.teams[other(side)], ULT_ON_HURT);
 
-  push(state, attacker.name + " " + move + multiplierText(multiplier) + (crit ? " คริติคอล! 💥" : "")
+  push(state, attacker.name + " " + move + multiplierText(multiplier)
+    + (field > 1 ? " สนามช่วย " + WEATHER[state.weather ?? "CLEAR"].icon : field < 1 ? " สนามกด " + WEATHER[state.weather ?? "CLEAR"].icon : "")
+    + (combo ? " 🔗 คอมโบ " + combo.name + "!" : "") + (crit ? " คริติคอล! 💥" : "")
     + (guarded ? " (ตั้งรับไว้ ลดครึ่ง 🛡️)" : "") + " → " + defender.name + " −" + damage + " HP (" + defender.hp + "/" + defender.stats.hp + ")");
+  if (combo) {
+    emit(state, { kind: "combo", side: other(side), index: defenderIndex, combo: combo.name });
+    if (combo.consume) defender.statuses = defender.statuses.filter((status) => status.kind !== combo.needs);
+    if (combo.burn && defender.hp > 0) addStatus(defender, "BURN", 2);
+  }
+  const mark = MARK_FROM[attacker.type_primary];
+  if (mark && defender.hp > 0 && !combo) addStatus(defender, mark, MARK_TURNS);
   emit(state, {
     kind: "hit", side: other(side), index: defenderIndex, amount: damage, hp: defender.hp, max: defender.stats.hp,
     crit, multiplier, guarded, type: attacker.type_primary,
@@ -342,7 +415,7 @@ function replaceFainted(state: BattleState) {
 
 export class ArenaError extends Error {}
 
-export function applyAction(state: BattleState, side: Side, action: Action, rng: Rng): BattleState {
+export function applyAction(state: BattleState, side: Side, action: Action, rng: Rng, target?: number): BattleState {
   if (state.winner) throw new ArenaError("การต่อสู้จบแล้ว");
   if (state.turn !== side) throw new ArenaError("ยังไม่ถึงตาคุณ");
   const next: BattleState = structuredClone(state);
@@ -350,10 +423,37 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   const fighter = activeFighter(next, side);
   if (action === "SPECIAL" && team.energy < SPECIAL_COST) throw new ArenaError("พลังไม่พอ ต้องมี ⚡ " + SPECIAL_COST);
   if (action === "ULTIMATE" && ultOf(team) < ULT_MAX) throw new ArenaError("หลอดไม้ตายยังไม่เต็ม");
+  if (action === "SWITCH") {
+    const bench = target === undefined ? undefined : team.fighters[target];
+    if (!bench || target === team.active || bench.hp <= 0) throw new ArenaError("เลือกตัวสำรองที่ยังสู้ได้");
+  }
+  if (action === "ITEM" && (!team.item || team.item.used)) throw new ArenaError("ไม่มีไอเทมให้ใช้");
 
   fighter.guard = false;
 
-  if (has(fighter, "PARALYZE") && rng() < PARALYZE_SKIP) {
+  // Switching and items work even while paralyzed, so they're a real escape.
+  if (action === "SWITCH") {
+    const who = side === "CHILD" ? "ลูก" : "ผู้ปกครอง";
+    emit(next, { kind: "recall", side, index: team.active });
+    team.active = target!;
+    push(next, "🔄 " + who + " เรียก " + fighter.name + " กลับ แล้วส่ง " + team.fighters[target!].name + " ออกมา!");
+    emit(next, { kind: "switch", side, index: target! });
+  } else if (action === "ITEM") {
+    const item = team.item!;
+    item.used = true;
+    const info = ITEMS[item.kind];
+    push(next, fighter.name + " ใช้ " + info.icon + " " + info.label + "!");
+    emit(next, { kind: "item", side, index: team.active, item: item.kind });
+    if (item.kind === "ETHER") team.energy = Math.min(ENERGY_MAX, team.energy + 2);
+    if (item.kind === "CLEANSE") fighter.statuses = fighter.statuses.filter((status) => !BAD_STATUSES.includes(status.kind));
+    const healRate = item.kind === "POTION" ? 0.3 : item.kind === "CLEANSE" ? 0.1 : 0;
+    const healed = Math.min(Math.round(fighter.stats.hp * healRate), fighter.stats.hp - fighter.hp);
+    if (healed > 0) {
+      fighter.hp += healed;
+      push(next, fighter.name + " ฟื้น +" + healed + " HP 💚 " + hpText(fighter));
+      emit(next, { kind: "heal", side, index: team.active, amount: healed, hp: fighter.hp, max: fighter.stats.hp });
+    }
+  } else if (has(fighter, "PARALYZE") && rng() < PARALYZE_SKIP) {
     push(next, fighter.name + " ⚡ ชา! ขยับไม่ได้");
     emit(next, { kind: "paralyzed", side, index: team.active });
   } else if (action === "GUARD") {
@@ -382,7 +482,17 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
     return next;
   }
   next.turn = other(side);
-  if (next.turn === "CHILD") next.round += 1;
+  if (next.turn === "CHILD") {
+    next.round += 1;
+    // Battles saved before weather existed have no weatherUntil and keep a clear field.
+    if (next.weatherUntil && next.round >= next.weatherUntil) {
+      next.weather = rollWeather(rng, next.weather);
+      next.weatherUntil = next.round + WEATHER_ROUNDS;
+      const field = WEATHER[next.weather];
+      push(next, "🌦️ สภาพสนามเปลี่ยน! " + field.icon + " " + field.label);
+      emit(next, { kind: "weather", side: "CHILD", index: 0, weather: next.weather });
+    }
+  }
   return next;
 }
 
@@ -391,11 +501,27 @@ export function chooseAiAction(state: BattleState, side: Side, rng: Rng): Action
   const me = activeFighter(state, side);
   const foe = activeFighter(state, other(side));
   if (ultOf(state.teams[side]) >= ULT_MAX) return "ULTIMATE";
+  if (aiSwitchTarget(state, side) !== null && rng() < 0.3) return "SWITCH";
   // Brace when the other side's ultimate is ready and this monster can't take it.
   if (ultOf(state.teams[other(side)]) >= ULT_MAX && me.hp < me.stats.hp * 0.6 && rng() < 0.5) return "GUARD";
   if (state.teams[side].energy >= SPECIAL_COST && (typeMultiplier(me.type_primary, foe) >= 1 || rng() < 0.5)) return "SPECIAL";
   if (me.hp < me.stats.hp * 0.35 && rng() < 0.4) return "GUARD";
   return "ATTACK";
+}
+
+// A bench monster that isn't weak to the current foe, when the active one is.
+export function aiSwitchTarget(state: BattleState, side: Side): number | null {
+  const team = state.teams[side];
+  const foe = activeFighter(state, other(side));
+  if (typeMultiplier(foe.type_primary, activeFighter(state, side)) < 1.5) return null;
+  const index = team.fighters.findIndex((fighter, i) => i !== team.active && fighter.hp > 0 && typeMultiplier(foe.type_primary, fighter) < 1.5);
+  return index === -1 ? null : index;
+}
+
+// Plays one AI turn, including the switch target when it decides to switch.
+export function aiTurn(state: BattleState, side: Side, rng: Rng) {
+  const action = chooseAiAction(state, side, rng);
+  return applyAction(state, side, action, rng, action === "SWITCH" ? aiSwitchTarget(state, side) ?? undefined : undefined);
 }
 
 // Winning side's fighter with the most damage.
