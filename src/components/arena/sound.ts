@@ -61,6 +61,9 @@ export const sfx = {
   faint: () => tone(400, 0.5, { to: 80, gain: 0.06 }),
   enter: () => tone(400, 0.15, { type: "sine", to: 800, gain: 0.05 }),
   win: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.18, { gain: 0.05, delay: i * 0.12 })),
+  heartbeat: () => [0, 0.22].forEach((delay) => tone(70, 0.12, { type: "sine", gain: 0.12, delay })),
+  count: () => tone(660, 0.1, { type: "square", gain: 0.05 }),
+  fight: () => { tone(523, 0.12, { gain: 0.06 }); tone(1046, 0.3, { gain: 0.06, delay: 0.1 }); },
   lose: () => [392, 330, 262].forEach((f, i) => tone(f, 0.22, { type: "triangle", gain: 0.05, delay: i * 0.15 })),
 };
 

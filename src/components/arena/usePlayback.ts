@@ -11,16 +11,20 @@ export type Fx = {
   screen: string;
   projectile: { from: Side; icon: string } | null;
   confetti: boolean;
+  cutin: { side: Side; name: string; type: string; index: number } | null;
+  commentary: { id: number; text: string; tone: string } | null;
 };
 // What the cards should show while events play: which fighter is out and its HP.
 export type Display = { active: Record<Side, number>; hp: Record<Side, number[]> };
 
-const EMPTY_FX: Fx = { sprite: {}, floats: [], banner: null, screen: "", projectile: null, confetti: false };
+const EMPTY_FX: Fx = { sprite: {}, floats: [], banner: null, screen: "", projectile: null, confetti: false, cutin: null, commentary: null };
+const COMMENTARY_MS = 1500;
+const STREAK_CALLOUT = 3;
 const FLOAT_MS = 1200;
 
 // Milliseconds each event holds the stage before the next one plays.
 const DURATION: Record<BattleEvent["kind"], number> = {
-  attack: 350, special: 750, hit: 650, miss: 550, heal: 550, status: 450, buff: 450,
+  attack: 350, special: 750, ultimate: 1400, hit: 650, miss: 550, heal: 550, status: 450, buff: 450,
   tick: 500, guard: 450, paralyzed: 450, faint: 800, switch: 550, win: 1000,
 };
 
@@ -37,6 +41,8 @@ export function usePlayback(state: BattleState, me: Side) {
   const lastSeq = useRef(state.eventSeq ?? 0);
   const shown = useRef<BattleState>(state);
   const floatId = useRef(0);
+  // Hits landed in a row per side, for the "on fire" callout; survives across batches.
+  const streak = useRef<Record<Side, number>>({ CHILD: 0, PARENT: 0 });
   const [display, setDisplay] = useState<Display | null>(null);
   const [fx, setFx] = useState<Fx>(EMPTY_FX);
   const [playing, setPlaying] = useState(false);
@@ -61,6 +67,12 @@ export function usePlayback(state: BattleState, me: Side) {
       setFx((fx) => ({ ...fx, floats: [...fx.floats, { id, side, text, tone }] }));
       timers.push(window.setTimeout(() => setFx((fx) => ({ ...fx, floats: fx.floats.filter((f) => f.id !== id) })), FLOAT_MS));
     };
+    const say = (text: string, tone = "hype") => {
+      const id = ++floatId.current;
+      setFx((fx) => ({ ...fx, commentary: { id, text, tone } }));
+      timers.push(window.setTimeout(() => setFx((fx) => (fx.commentary?.id === id ? { ...fx, commentary: null } : fx)), COMMENTARY_MS));
+    };
+    const alive = (side: Side) => current.hp[side].filter((hp) => hp > 0).length;
     const setHp = (event: BattleEvent) => {
       if (event.hp === undefined) return;
       current.hp[event.side] = current.hp[event.side].map((hp, i) => (i === event.index ? event.hp! : hp));
@@ -69,7 +81,7 @@ export function usePlayback(state: BattleState, me: Side) {
 
     function play(event: BattleEvent) {
       const foe: Side = event.side === "CHILD" ? "PARENT" : "CHILD";
-      setFx((fx) => ({ ...fx, sprite: {}, banner: null, screen: "", projectile: null }));
+      setFx((fx) => ({ ...fx, sprite: {}, banner: null, screen: "", projectile: null, cutin: null }));
       switch (event.kind) {
         case "attack":
           sfx.swing();
@@ -85,9 +97,25 @@ export function usePlayback(state: BattleState, me: Side) {
             projectile: { from: event.side, icon: TYPE_ICON[event.type ?? ""] ?? "✨" },
           }));
           break;
+        case "ultimate":
+          sfx.special();
+          buzz([60, 40, 60, 40, 120]);
+          setFx((fx) => ({
+            ...fx,
+            sprite: { [event.side]: "charge" },
+            cutin: { side: event.side, name: event.move ?? "ท่าไม้ตาย", type: (event.type ?? "Normal").toLowerCase(), index: event.index },
+            screen: "flash flash-" + (event.type ?? "Normal").toLowerCase(),
+          }));
+          say("ท่าไม้ตาย!!! 💥", "ultimate");
+          break;
         case "hit":
           setHp(event);
           if (event.crit) { sfx.crit(); buzz([40, 30, 60]); } else sfx.hit();
+          streak.current[foe] += 1;
+          if (event.hp !== undefined && event.hp > 0 && event.max && event.hp / event.max <= 0.1) say("เกือบไปแล้ว!! 😱", "clutch");
+          else if (event.crit) say("โอ้โห! คริติคอลสุดแรง! 💥", "crit");
+          else if ((event.multiplier ?? 1) >= 2) say("แรงสุดๆ! ได้เปรียบธาตุ ×2!", "good");
+          else if (streak.current[foe] === STREAK_CALLOUT) say("ตีโดนติดกัน " + STREAK_CALLOUT + " ครั้ง! ร้อนแรง 🔥", "hype");
           setFx((fx) => ({ ...fx, sprite: { [event.side]: "hurt" }, screen: event.crit ? "shake" : "" }));
           addFloat(event.side, (event.crit ? "CRITICAL! " : "") + "−" + event.amount, event.crit ? "crit" : "damage");
           if ((event.multiplier ?? 1) >= 1.5) addFloat(event.side, "ได้เปรียบ! ×" + event.multiplier, "good");
@@ -96,6 +124,8 @@ export function usePlayback(state: BattleState, me: Side) {
           break;
         case "miss":
           sfx.miss();
+          streak.current[foe] = 0;
+          say("หลบสวย! 💨", "cool");
           setFx((fx) => ({ ...fx, sprite: { [event.side]: "dodge" } }));
           addFloat(event.side, "MISS 💨", "miss");
           break;
@@ -130,6 +160,8 @@ export function usePlayback(state: BattleState, me: Side) {
         case "faint":
           sfx.faint();
           buzz(120);
+          streak.current[event.side] = 0;
+          current.hp[event.side] = current.hp[event.side].map((hp, i) => (i === event.index ? 0 : hp));
           setFx((fx) => ({ ...fx, sprite: { [event.side]: "faint" } }));
           break;
         case "switch":
@@ -137,9 +169,13 @@ export function usePlayback(state: BattleState, me: Side) {
           setDisplay({ active: { ...current.active }, hp: { CHILD: [...current.hp.CHILD], PARENT: [...current.hp.PARENT] } });
           sfx.enter();
           setFx((fx) => ({ ...fx, sprite: { [event.side]: "enter" } }));
+          if (current.hp[event.side].length > 1 && alive(event.side) === 1) say("ตัวสุดท้าย! ฮึดสู้!! 🔥", "clutch");
           break;
         case "win":
           if (event.side === me) sfx.win(); else sfx.lose();
+          // A comeback: the winner is down to its last monster and beat a full team of 2+.
+          if (current.hp[event.side].length > 1 && current.hp[foe].length > 1 && alive(event.side) === 1) say("พลิกเกม!!! 🤯", "ultimate");
+          else say(event.side === me ? "ชนะแล้ว! 🏆" : "สู้ได้ดีมาก! 💪", "hype");
           setFx((fx) => ({ ...fx, sprite: { [foe]: "faint" }, confetti: event.side === me }));
           break;
       }

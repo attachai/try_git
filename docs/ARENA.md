@@ -38,6 +38,7 @@ The child always moves first, then turns alternate. On your turn you pick one:
 - ⚔️ **Attack**: can be evaded (defender's evade %, capped at 40%)
 - 🌟 **Special**: costs ⚡3, never misses, ×1.6 power (Normal: ×2), plus the type's effect below
 - 🛡️ **Guard**: the next hit you take is halved, and you get ⚡+1 extra
+- 💥 **Ultimate**: needs a full gauge (100). ×2.2 power, never misses, applies the type's special effect, costs no energy, and resets the gauge. Guard still halves it. The gauge fills +15 per hit you land, +10 per hit you take, and +10 for guarding. That's about one ultimate per side per battle in simulation (median 15 turns, and moving first still wins 55.6%)
 
 Energy: +1 at the end of each of your turns, +1 whenever you're hit, max 5.
 
@@ -85,6 +86,14 @@ Every beat the engine resolves is also recorded as a structured event in `state.
 | win | confetti for the winner's screen |
 
 During playback, the cards show the HP and active monster of that moment, the battle log holds the previous lines so it doesn't spoil the outcome, and action buttons stay disabled. Sounds are synthesized with Web Audio (no asset files), and the 🔊/🔇 toggle is remembered per device. `prefers-reduced-motion` turns the animations off.
+
+### Hype
+
+- **Intro:** both teams slide in for a VS reveal, then a 3-2-1 **FIGHT!** countdown, once per room per device (sessionStorage). Actions are locked until it ends
+- **Commentary:** callouts during playback, for crits, ×2 advantage, a dodge, 3 hits in a row, surviving at ≤10% HP ("เกือบไปแล้ว!!"), the last monster coming in, an ultimate, and a comeback win with the last monster against a team of 2+ ("พลิกเกม!!!")
+- **Danger:** when your active monster is at ≤25% HP, a pulsing red vignette, a blinking HP bar, and a heartbeat sound
+- **Ultimate cut-in:** a type-colored diagonal band with the monster's art and the move name
+- **Emoji reactions:** 8 emojis, sent with `POST /api/arena/rooms/:code/emote`. They're stored in `arena_rooms.emotes` with their own `emote_seq` (migration 0013), so they never bump the battle `version`. Each side can send one per second, and the last 10 are kept. Polling re-renders when either `version` or `emote_seq` changes
 
 ## Rooms
 

@@ -646,6 +646,25 @@ describe("arena rooms", () => {
     expect(owned).toEqual({ level: 1, xp: 0 });
   });
 
+  it("relays emoji reactions without touching the battle version", async () => {
+    const { parent, kid, code, view } = await roomWithTeam(false);
+    expect((await post(`/api/arena/rooms/${code}/emote`, kid, { emoji: "🔥" })).status).toBe(200);
+    // Too soon for the same side, but the other side can react.
+    expect((await post(`/api/arena/rooms/${code}/emote`, kid, { emoji: "😆" })).status).toBe(429);
+    expect((await post(`/api/arena/rooms/${code}/emote`, parent, { emoji: "👏" })).status).toBe(200);
+    expect((await post(`/api/arena/rooms/${code}/emote`, kid, { emoji: "💩" })).status).toBe(400);
+
+    const seen = await (await SELF.fetch(`https://example.test/api/arena/rooms/${code}`, { headers: { cookie: parent } })).json() as View & {
+      emotes: { side: string; emoji: string; seq: number }[];
+      room: { emote_seq: number };
+    };
+    expect(seen.emotes.map((e) => [e.side, e.emoji])).toEqual([["CHILD", "🔥"], ["PARENT", "👏"]]);
+    expect(seen.room.emote_seq).toBe(2);
+    expect(seen.room.version).toBe(view.room.version);
+    // The child's move still applies after the reactions.
+    expect((await post(`/api/arena/rooms/${code}/action`, kid, { version: view.room.version, action: "ATTACK" })).status).toBe(200);
+  });
+
   it("validates room settings", async () => {
     const parent = await sessionCookie("parent");
     expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 500, autoParent: false })).status).toBe(400);

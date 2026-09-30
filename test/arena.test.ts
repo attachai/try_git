@@ -169,3 +169,43 @@ describe("battle events", () => {
     expect(state.events![0].seq).toBe(11);
   });
 });
+
+describe("ultimate", () => {
+  it("fills the gauge from hits, taking hits, and guarding", () => {
+    let state = battle([mon("Onix", "Rock")], [mon("Onix2", "Rock")]);
+    state = applyAction(state, "CHILD", "ATTACK", steady);
+    expect(state.teams.CHILD.ult).toBe(15);
+    expect(state.teams.PARENT.ult).toBe(10);
+    state = applyAction(state, "PARENT", "GUARD", steady);
+    expect(state.teams.PARENT.ult).toBe(20);
+  });
+
+  it("needs a full gauge, hits for x2.2 with the special's effect, and resets", () => {
+    const base = battle([mon("Charmander", "Fire")], [mon("Onix", "Rock")]);
+    expect(() => applyAction(base, "CHILD", "ULTIMATE", steady)).toThrow("หลอดไม้ตาย");
+
+    const special = structuredClone(base);
+    special.teams.CHILD.energy = 3;
+    const afterSpecial = applyAction(special, "CHILD", "SPECIAL", steady);
+    const ult = structuredClone(base);
+    ult.teams.CHILD.ult = 100;
+    const afterUlt = applyAction(ult, "CHILD", "ULTIMATE", steady);
+
+    const dealt = (s: BattleState) => activeFighter(s, "PARENT").stats.hp - activeFighter(s, "PARENT").hp;
+    // Same base damage, x2.2 instead of x1.6 (burn tick happens later, on the parent's turn).
+    expect(dealt(afterUlt) / dealt(afterSpecial)).toBeCloseTo(2.2 / 1.6, 1);
+    expect(afterUlt.teams.CHILD.ult).toBe(0);
+    expect(afterUlt.teams.CHILD.energy).toBe(1); // no energy spent, +1 end of turn
+    expect(activeFighter(afterUlt, "PARENT").statuses).toEqual([{ kind: "BURN", turns: 2 }]);
+    expect(afterUlt.events!.find((e) => e.kind === "ultimate")).toMatchObject({ move: "นรกเพลิง", type: "Fire" });
+  });
+
+  it("is halved by guard and used by the AI when ready", () => {
+    let state = battle([mon("Charmander", "Fire")], [mon("Onix", "Rock")]);
+    state.teams.PARENT.ult = 100;
+    expect(chooseAiAction(state, "PARENT", steady)).toBe("ULTIMATE");
+    state = applyAction(state, "CHILD", "GUARD", steady);
+    state = applyAction(state, "PARENT", "ULTIMATE", steady);
+    expect(state.log.join("\n")).toContain("ลดครึ่ง");
+  });
+});
