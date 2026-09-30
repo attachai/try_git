@@ -27,12 +27,32 @@ export type Fighter = {
   damageDealt: number;
 };
 export type Team = { fighters: Fighter[]; active: number; energy: number };
+// Structured record of what happened, so the UI can animate each beat in order.
+// `side` is who the event happens to; `index` is that fighter's slot in the team.
+export type BattleEvent = {
+  seq: number;
+  kind: "attack" | "special" | "hit" | "miss" | "heal" | "status" | "buff" | "tick" | "guard" | "paralyzed" | "faint" | "switch" | "win";
+  side: Side;
+  index: number;
+  hp?: number;
+  max?: number;
+  amount?: number;
+  crit?: boolean;
+  multiplier?: number;
+  guarded?: boolean;
+  type?: string;
+  move?: string;
+  status?: StatusKind;
+};
 export type BattleState = {
   turn: Side;
   round: number;
   teams: Record<Side, Team>;
   log: string[];
   winner: Side | null;
+  // Optional so battles saved before events existed still load.
+  events?: BattleEvent[];
+  eventSeq?: number;
 };
 export type Rng = () => number;
 
@@ -40,6 +60,7 @@ export const ENERGY_MAX = 5;
 export const SPECIAL_COST = 3;
 export const EVADE_CAP = 40;
 export const LOG_LIMIT = 40;
+export const EVENT_LIMIT = 40;
 export const SMALL_TEAM_HP_BONUS = 1.2;
 export const LAST_STAND_ATK = 1.15;
 
@@ -142,6 +163,12 @@ function push(state: BattleState, line: string) {
   if (state.log.length > LOG_LIMIT) state.log.splice(0, state.log.length - LOG_LIMIT);
 }
 
+function emit(state: BattleState, event: Omit<BattleEvent, "seq">) {
+  const seq = (state.eventSeq ?? 0) + 1;
+  state.eventSeq = seq;
+  state.events = [...(state.events ?? []), { ...event, seq }].slice(-EVENT_LIMIT);
+}
+
 function addStatus(fighter: Fighter, kind: StatusKind, turns: number) {
   const existing = fighter.statuses.find((status) => status.kind === kind);
   if (existing) existing.turns = Math.max(existing.turns, turns);
@@ -189,10 +216,14 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng) 
   const defender = activeFighter(state, other(side));
   const icon = TYPE_ICON[attacker.type_primary] ?? "";
   const move = special ? "ใช้ 🌟 " + icon + " " + special.name + "!" : "⚔️ โจมตี";
+  const attackerIndex = state.teams[side].active;
+  const defenderIndex = state.teams[other(side)].active;
+  emit(state, { kind: special ? "special" : "attack", side, index: attackerIndex, type: attacker.type_primary, move: special?.name });
 
   // Special moves never miss, so saving energy for one is always worth it.
   if (!special && rng() * 100 < effectiveEva(defender)) {
     push(state, attacker.name + " " + move + " → " + defender.name + " หลบได้! 💨");
+    emit(state, { kind: "miss", side: other(side), index: defenderIndex });
     return;
   }
 
@@ -214,23 +245,32 @@ function hit(state: BattleState, side: Side, special: Special | null, rng: Rng) 
 
   push(state, attacker.name + " " + move + multiplierText(multiplier) + (crit ? " คริติคอล! 💥" : "")
     + (guarded ? " (ตั้งรับไว้ ลดครึ่ง 🛡️)" : "") + " → " + defender.name + " −" + damage + " HP (" + defender.hp + "/" + defender.stats.hp + ")");
+  emit(state, {
+    kind: "hit", side: other(side), index: defenderIndex, amount: damage, hp: defender.hp, max: defender.stats.hp,
+    crit, multiplier, guarded, type: attacker.type_primary,
+  });
 
   if (!special) return;
   if (special.target && defender.hp > 0) {
     addStatus(defender, special.target.kind, special.target.turns);
     const info = STATUS_INFO[special.target.kind];
     push(state, defender.name + " ติด " + info.icon + " " + info.label + " " + special.target.turns + " ตา");
+    emit(state, { kind: "status", side: other(side), index: defenderIndex, status: special.target.kind });
   }
   if (special.self) {
     addStatus(attacker, special.self.kind, special.self.turns);
     const info = STATUS_INFO[special.self.kind];
     push(state, attacker.name + " ได้ " + info.icon + " " + info.label);
+    emit(state, { kind: "buff", side, index: attackerIndex, status: special.self.kind });
   }
   const healAmount = Math.round((special.drain ? damage * special.drain : 0) + (special.heal ? attacker.stats.hp * special.heal : 0));
   if (healAmount > 0) {
     const healed = Math.min(healAmount, attacker.stats.hp - attacker.hp);
     attacker.hp += healed;
-    if (healed > 0) push(state, attacker.name + " ฟื้น +" + healed + " HP 💚 " + hpText(attacker));
+    if (healed > 0) {
+      push(state, attacker.name + " ฟื้น +" + healed + " HP 💚 " + hpText(attacker));
+      emit(state, { kind: "heal", side, index: attackerIndex, amount: healed, hp: attacker.hp, max: attacker.stats.hp });
+    }
   }
   if (special.cleanse) attacker.statuses = attacker.statuses.filter((status) => !BAD_STATUSES.includes(status.kind));
 }
@@ -246,6 +286,7 @@ function endOfTurn(state: BattleState, side: Side) {
     fighter.hp -= damage;
     const info = STATUS_INFO[status.kind];
     push(state, fighter.name + " " + info.icon + " " + info.label + " −" + damage + " HP (" + fighter.hp + "/" + fighter.stats.hp + ")");
+    emit(state, { kind: "tick", side, index: state.teams[side].active, amount: damage, hp: fighter.hp, max: fighter.stats.hp, status: status.kind });
   }
   fighter.statuses = fighter.statuses
     .map((status) => ({ ...status, turns: status.turns - 1 }))
@@ -258,6 +299,7 @@ function replaceFainted(state: BattleState) {
     const fighter = team.fighters[team.active];
     if (fighter.hp > 0) continue;
     push(state, "😵 " + fighter.name + " หมดแรง!");
+    emit(state, { kind: "faint", side, index: team.active });
     const next = team.fighters.findIndex((candidate) => candidate.hp > 0);
     if (next === -1) {
       state.winner = other(side);
@@ -266,6 +308,7 @@ function replaceFainted(state: BattleState) {
     team.active = next;
     const who = side === "CHILD" ? "ลูก" : "ผู้ปกครอง";
     push(state, "➡️ " + who + " ส่ง " + team.fighters[next].name + " ออกมาสู้!" + (isLastStand(team) ? " 🔥 ฮึดสู้! ATK +15%" : ""));
+    emit(state, { kind: "switch", side, index: next });
   }
 }
 
@@ -283,10 +326,12 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
 
   if (has(fighter, "PARALYZE") && rng() < PARALYZE_SKIP) {
     push(next, fighter.name + " ⚡ ชา! ขยับไม่ได้");
+    emit(next, { kind: "paralyzed", side, index: team.active });
   } else if (action === "GUARD") {
     fighter.guard = true;
     team.energy = Math.min(ENERGY_MAX, team.energy + 1);
     push(next, fighter.name + " 🛡️ ตั้งรับ! (พลัง ⚡ " + team.energy + ")");
+    emit(next, { kind: "guard", side, index: team.active });
   } else if (action === "SPECIAL") {
     team.energy -= SPECIAL_COST;
     hit(next, side, SPECIALS[fighter.type_primary] ?? SPECIALS.Normal, rng);
@@ -300,6 +345,7 @@ export function applyAction(state: BattleState, side: Side, action: Action, rng:
   replaceFainted(next);
   if (next.winner) {
     push(next, next.winner === "CHILD" ? "🏆 ลูกชนะ!" : "🏆 ผู้ปกครองชนะ!");
+    emit(next, { kind: "win", side: next.winner, index: next.teams[next.winner].active });
     return next;
   }
   next.turn = other(side);
