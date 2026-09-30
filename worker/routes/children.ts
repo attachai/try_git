@@ -15,6 +15,20 @@ const addParentSchema = z.object({
   pin: z.string().regex(/^\d{4,8}$/),
 });
 
+const updateFamilySchema = z.object({
+  familyId: z.string().min(1),
+  name: z.string().trim().min(2).max(100),
+  familyCode: z.string().trim().min(4).max(20),
+});
+
+const renameMemberSchema = z.object({
+  familyId: z.string().min(1),
+  userId: z.string().min(1),
+  displayName: z.string().trim().min(1).max(80),
+});
+
+const leaveFamilySchema = z.object({ familyId: z.string().min(1) });
+
 const avatarSchema = z.object({
   childId: z.string().min(1),
   avatarUrl: z.string()
@@ -116,6 +130,71 @@ export async function childrenRoutes(request: Request, env: Env, pathname: strin
     ]);
 
     return json({ parent: { id: parentId, display_name: parsed.data.displayName, relation: parsed.data.relation } }, { status: 201 });
+  }
+
+  // Rename a family and change its Family Code. Existing sessions keep working;
+  // the new code is needed the next time someone signs in.
+  if (pathname === "/api/families/update" && request.method === "POST") {
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+    const parsed = updateFamilySchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "ชื่อ 2-100 ตัวอักษร และ Family Code 4-20 ตัวอักษร");
+    const family = await parentFamily(env, user.id, parsed.data.familyId);
+    if (!family) return error(404, "FAMILY_NOT_FOUND", "Family not found.");
+    const familyCode = normalizedCode(parsed.data.familyCode);
+    try {
+      await env.DB.prepare("UPDATE families SET name = ?, join_code = ? WHERE id = ?")
+        .bind(parsed.data.name, familyCode, family.id).run();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (message.includes("UNIQUE constraint failed")) return error(409, "FAMILY_CODE_TAKEN", "Family Code นี้ถูกใช้แล้ว");
+      throw cause;
+    }
+    return json({ family: { id: family.id, name: parsed.data.name, family_code: familyCode } });
+  }
+
+  // Rename a parent or child profile in one of the caller's families.
+  if (pathname === "/api/members/rename" && request.method === "POST") {
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+    const parsed = renameMemberSchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "ชื่อ 1-80 ตัวอักษร");
+    const family = await parentFamily(env, user.id, parsed.data.familyId);
+    if (!family) return error(404, "FAMILY_NOT_FOUND", "Family not found.");
+    const member = await env.DB.prepare(
+      `SELECT u.id, u.role, c.id AS child_id FROM family_members fm
+       JOIN users u ON u.id = fm.user_id LEFT JOIN children c ON c.user_id = u.id
+       WHERE fm.family_id = ? AND fm.user_id = ?`,
+    ).bind(family.id, parsed.data.userId).first<{ id: string; role: string; child_id: string | null }>();
+    if (!member) return error(404, "MEMBER_NOT_FOUND", "ไม่พบสมาชิกคนนี้");
+
+    const name = parsed.data.displayName;
+    const statements = [env.DB.prepare("UPDATE users SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(name, member.id)];
+    if (member.child_id) {
+      // Child login looks children up by family code + case-insensitive name.
+      const taken = await env.DB.prepare(
+        "SELECT id FROM children WHERE family_id = ? AND lower(display_name) = lower(?) AND id <> ?",
+      ).bind(family.id, name, member.child_id).first();
+      if (taken) return error(409, "CHILD_NAME_TAKEN", "ครอบครัวนี้มีเด็กชื่อนี้แล้ว");
+      statements.push(env.DB.prepare("UPDATE children SET display_name = ? WHERE id = ?").bind(name, member.child_id));
+    }
+    await env.DB.batch(statements);
+    return json({ member: { user_id: member.id, display_name: name } });
+  }
+
+  // Leave a family, e.g. after creating it for someone else. Another parent with a
+  // PIN must stay so the family can still be managed.
+  if (pathname === "/api/families/leave" && request.method === "POST") {
+    if (user.role !== "PARENT") return error(403, "FORBIDDEN", "Parent role required.");
+    const parsed = leaveFamilySchema.safeParse(await readJson<unknown>(request));
+    if (!parsed.success) return error(400, "INVALID_REQUEST", "Invalid family.");
+    const family = await parentFamily(env, user.id, parsed.data.familyId);
+    if (!family) return error(404, "FAMILY_NOT_FOUND", "Family not found.");
+    const others = await env.DB.prepare(
+      `SELECT count(*) AS n FROM family_members fm JOIN users u ON u.id = fm.user_id
+       WHERE fm.family_id = ? AND fm.user_id <> ? AND fm.relation IN ('FATHER','MOTHER','GUARDIAN') AND u.pin_hash IS NOT NULL`,
+    ).bind(family.id, user.id).first<{ n: number }>();
+    if (!others?.n) return error(409, "LAST_PARENT", "ต้องมีผู้ปกครองคนอื่นที่ตั้ง PIN แล้วอยู่ในครอบครัวก่อน");
+    await env.DB.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ?").bind(family.id, user.id).run();
+    return json({ ok: true });
   }
 
   if (pathname === "/api/children/avatar" && request.method === "POST") {

@@ -27,7 +27,8 @@ export default {
     } else if (url.pathname.startsWith("/api/auth/")) {
       response = (await authRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname === "/api/children" || url.pathname === "/api/child/me" || url.pathname === "/api/families" ||
-      url.pathname === "/api/parents" || url.pathname === "/api/children/avatar") {
+      url.pathname === "/api/parents" || url.pathname === "/api/children/avatar" || url.pathname === "/api/families/update" ||
+      url.pathname === "/api/families/leave" || url.pathname === "/api/members/rename") {
       response = (await childrenRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname === "/api/points" || /^\/api\/children\/[^/]+\/history$/.test(url.pathname)) {
       response = (await pointsRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");

@@ -961,3 +961,13 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .arena-stage-track span { padding: 6px 4px; border-radius: 10px; background: #f1f5f9; color: #94a3b8; font-size: 12px; font-weight: 800; text-align: center; }
 .arena-stage-track .current { background: linear-gradient(135deg, #6366f1, #a855f7); color: white; box-shadow: 0 4px 12px rgba(99,102,241,.35); }
 .arena-stage-track .cleared { background: #dcfce7; color: #15803d; }
+
+/* Family editing */
+.family-edit { margin: 8px 0; padding: 12px; border-radius: 14px; background: #f8fafc; }
+.family-edit-actions { display: flex; align-items: center; gap: 12px; }
+.family-edit-actions .submit-button { width: auto; padding: 10px 20px; }
+.member-rename { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.member-rename .reason-input { flex: 1; min-width: 0; padding: 8px 10px; }
+.member-rename .quest-button { padding: 7px 10px; font-size: 12px; }
+.link-button.inline { padding: 0; font-size: inherit; }
+.family-leave { margin-top: 6px; color: #b91c1c; font-size: 13px; }

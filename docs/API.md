@@ -32,6 +32,14 @@ Parent only. Returns children belonging to the parent's family.
 ### GET /api/child/me
 Child only. Returns the child profile linked to the session user.
 
+## Families (parent only)
+
+- `GET /api/families`: the caller's families with members and whether each has a PIN.
+- `POST /api/families/update` `{ familyId, name, familyCode }`: rename a family and change its Family Code (normalized to upper case, spaces to `-`). 409 `FAMILY_CODE_TAKEN` when another family uses it.
+- `POST /api/members/rename` `{ familyId, userId, displayName }`: rename a parent or child in that family. Child names stay unique per family (409 `CHILD_NAME_TAKEN`).
+- `POST /api/families/leave` `{ familyId }`: remove the caller from a family, e.g. after creating it for someone else. 409 `LAST_PARENT` unless another parent with a PIN remains.
+- `POST /api/parents` `{ familyId, displayName, relation, pin }`: add a parent who signs in with the profile picker PIN.
+
 ## Points
 
 ### POST /api/points

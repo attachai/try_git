@@ -976,3 +976,52 @@ describe("arena progression", () => {
     expect(lost.results?.rp.delta).toBe(7);
   });
 });
+
+describe("family editing", () => {
+  const get = (path: string, cookie: string) => SELF.fetch("https://example.test" + path, { headers: { cookie } });
+  type Families = { families: { id: string; name: string; family_code: string | null; members: { user_id: string; display_name: string }[] }[] };
+
+  it("renames a family and changes its Family Code, refusing a code in use", async () => {
+    const parent = await sessionCookie("parent");
+    await env.DB.prepare("INSERT INTO families (id, name, join_code) VALUES ('fam_other', 'Other', 'TAKEN1')").run();
+    const saved = await post("/api/families/update", parent, { familyId: "fam_test", name: "TEST", familyCode: " test 01 " });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toEqual({ family: { id: "fam_test", name: "TEST", family_code: "TEST-01" } });
+    expect((await post("/api/families/update", parent, { familyId: "fam_test", name: "TEST", familyCode: "taken1" })).status).toBe(409);
+    // Not the caller's family.
+    expect((await post("/api/families/update", parent, { familyId: "fam_other", name: "Mine", familyCode: "MINE1" })).status).toBe(404);
+    expect((await post("/api/families/update", await sessionCookie("child-user"), { familyId: "fam_test", name: "Kid", familyCode: "KID1" })).status).toBe(403);
+
+    // The new code works for the profile picker.
+    const lookup = await post("/api/auth/family", "", { familyCode: "test-01" });
+    expect(lookup.status).toBe(200);
+  });
+
+  it("renames children and parents, keeping child names unique in a family", async () => {
+    const parent = await sessionCookie("parent");
+    expect((await post("/api/members/rename", parent, { familyId: "fam_test", userId: "child-user", displayName: "TEST" })).status).toBe(200);
+    expect(await env.DB.prepare("SELECT display_name FROM children WHERE id = 'child'").first()).toEqual({ display_name: "TEST" });
+    expect(await env.DB.prepare("SELECT display_name FROM users WHERE id = 'child-user'").first()).toEqual({ display_name: "TEST" });
+
+    await post("/api/children", parent, { displayName: "Second", pin: "1234", familyId: "fam_test" });
+    const second = await env.DB.prepare("SELECT user_id FROM children WHERE display_name = 'Second'").first<{ user_id: string }>();
+    expect((await post("/api/members/rename", parent, { familyId: "fam_test", userId: second!.user_id, displayName: "test" })).status).toBe(409);
+
+    expect((await post("/api/members/rename", parent, { familyId: "fam_test", userId: "parent", displayName: "DAD" })).status).toBe(200);
+    expect(await env.DB.prepare("SELECT display_name FROM users WHERE id = 'parent'").first()).toEqual({ display_name: "DAD" });
+    expect((await post("/api/members/rename", parent, { familyId: "fam_test", userId: "nobody", displayName: "X" })).status).toBe(404);
+  });
+
+  it("lets a parent leave a family once another parent with a PIN is in it", async () => {
+    const parent = await sessionCookie("parent");
+    expect((await post("/api/families/leave", parent, { familyId: "fam_test" })).status).toBe(409);
+    expect((await post("/api/parents", parent, { familyId: "fam_test", displayName: "MUM", relation: "MOTHER", pin: "2468" })).status).toBe(201);
+    expect((await post("/api/families/leave", parent, { familyId: "fam_test" })).status).toBe(200);
+    const after = await (await get("/api/families", parent)).json() as Families;
+    expect(after.families).toEqual([]);
+    // MUM still sees the child.
+    const mum = await env.DB.prepare("SELECT id FROM users WHERE display_name = 'MUM'").first<{ id: string }>();
+    const mine = await (await get("/api/families", await sessionCookie(mum!.id))).json() as Families;
+    expect(mine.families[0].members.map((member) => member.display_name)).toEqual(expect.arrayContaining(["MUM", "Child"]));
+  });
+});
