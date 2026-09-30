@@ -845,6 +845,7 @@ describe("arena progression", () => {
     foe.fighters[0].stats.eva = 0;
     state.teams.CHILD.fighters.forEach((fighter: { statuses: unknown[] }) => { fighter.statuses = []; });
     state.turn = "CHILD";
+    delete state.theme; // Space and Forest add evasion on top of the stat
     await env.DB.prepare("UPDATE arena_rooms SET state = ? WHERE id = ?").bind(JSON.stringify(state), row!.id).run();
   }
 
