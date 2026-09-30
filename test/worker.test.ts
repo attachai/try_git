@@ -1025,3 +1025,66 @@ describe("family editing", () => {
     expect(mine.families[0].members.map((member) => member.display_name)).toEqual(expect.arrayContaining(["MUM", "Child"]));
   });
 });
+
+describe("arena family isolation", () => {
+  type View = { room: { code: string; status: string; version: number } | null };
+  const get = (path: string, cookie: string) => SELF.fetch("https://example.test" + path, { headers: { cookie } });
+
+  // A second family with its own parent and child, plus a battle in progress in fam_test.
+  async function setup() {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')"),
+      env.DB.prepare("INSERT INTO users (id, display_name, role) VALUES ('other-parent', 'Other Parent', 'PARENT')"),
+      env.DB.prepare("INSERT INTO users (id, display_name, role) VALUES ('other-kid', 'Other Kid', 'CHILD')"),
+      env.DB.prepare("INSERT INTO family_members (id, family_id, user_id, relation) VALUES ('fm-op', 'fam_other', 'other-parent', 'MOTHER')"),
+      env.DB.prepare("INSERT INTO family_members (id, family_id, user_id, relation) VALUES ('fm-ok', 'fam_other', 'other-kid', 'CHILD')"),
+      env.DB.prepare("INSERT INTO children (id, family_id, user_id, display_name, points_balance) VALUES ('other-child', 'fam_other', 'other-kid', 'Other Kid', 1000)"),
+    ]);
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE child_id = 'child'").first<{ id: string }>();
+    const { room } = await (await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 50, autoParent: false })).json() as View;
+    await post(`/api/arena/rooms/${room!.code}/join`, kid, {});
+    const started = await (await post(`/api/arena/rooms/${room!.code}/team`, kid, { childCharacterIds: [owned!.id] })).json() as View;
+    return {
+      parent, kid, code: room!.code, version: started.room!.version,
+      otherParent: await sessionCookie("other-parent"), otherKid: await sessionCookie("other-kid"),
+    };
+  }
+
+  it("keeps another family's parent out of a room: view, moves, emotes, cancel", async () => {
+    const { code, version, otherParent, parent } = await setup();
+    expect((await get(`/api/arena/rooms/${code}`, otherParent)).status).toBe(404);
+    for (const [verb, body] of [
+      ["action", { version, action: "ATTACK" }], ["emote", { emoji: "🔥" }], ["cancel", {}], ["join", {}], ["team", { childCharacterIds: ["x"] }], ["next", {}],
+    ] as const) {
+      expect((await post(`/api/arena/rooms/${code}/${verb}`, otherParent, body)).status, verb).toBe(404);
+    }
+    expect((await (await get("/api/arena/rooms/current", otherParent)).json() as View).room).toBeNull();
+
+    // Nothing changed for the real room.
+    const real = await (await get(`/api/arena/rooms/${code}`, parent)).json() as View;
+    expect(real.room).toMatchObject({ status: "BATTLE", version });
+  });
+
+  it("keeps another family's parent out of a child's history and profile", async () => {
+    const { otherParent } = await setup();
+    expect((await get("/api/arena/history?childId=child", otherParent)).status).toBe(404);
+    expect((await get("/api/arena/profile?childId=child", otherParent)).status).toBe(404);
+    // Their own child is fine.
+    expect((await get("/api/arena/history?childId=other-child", otherParent)).status).toBe(200);
+  });
+
+  it("keeps another family's child out of a room in progress and each family out of the other's rooms", async () => {
+    const { code, version, otherKid, otherParent, kid } = await setup();
+    expect((await get(`/api/arena/rooms/${code}`, otherKid)).status).toBe(404);
+    expect((await post(`/api/arena/rooms/${code}/action`, otherKid, { version, action: "ATTACK" })).status).toBe(404);
+    expect((await (await get("/api/arena/rooms/current", otherKid)).json() as View).room).toBeNull();
+
+    // The other family's waiting room can't be joined by this family's child.
+    const { room } = await (await post("/api/arena/rooms", otherParent, { difficulty: "EASY", prize: 0, autoParent: true })).json() as View;
+    expect((await post(`/api/arena/rooms/${room!.code}/join`, kid, {})).status).toBe(404);
+    expect((await post(`/api/arena/rooms/${room!.code}/join`, otherKid, {})).status).toBe(200);
+  });
+});
