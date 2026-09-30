@@ -281,3 +281,71 @@ describe("field, combos, switching, items", () => {
     expect(after.teams.PARENT.active).toBe(1);
   });
 });
+
+describe("arena themes and field events", () => {
+  const themed = (theme: Parameters<typeof startBattle>[3], child = [mon("Squirtle", "Water")], parent = [mon("Onix", "Rock")]) =>
+    startBattle(makeTeam(child), makeTeam(parent), "CLEAR", theme);
+  // Rolls: never trigger random field events (0.99 ≥ chance) unless asked.
+  const guardRound = (s: BattleState) => applyAction(applyAction(s, "CHILD", "GUARD", steady), "PARENT", "GUARD", steady);
+
+  it("erupts lava every 3 rounds on non-fire monsters", () => {
+    let state = themed("VOLCANO", [mon("Charmander", "Fire")], [mon("Onix", "Rock")]);
+    state = guardRound(guardRound(state)); // start of round 3
+    expect(state.round).toBe(3);
+    const onix = activeFighter(state, "PARENT");
+    expect(onix.stats.hp - onix.hp).toBe(Math.round(onix.stats.hp * 0.05));
+    expect(activeFighter(state, "CHILD").hp).toBe(activeFighter(state, "CHILD").stats.hp);
+    expect(state.events!.some((e) => e.kind === "field" && e.fieldEvent === "LAVA")).toBe(true);
+  });
+
+  it("heals water monsters on the beach", () => {
+    let state = themed("BEACH");
+    state.teams.CHILD.fighters[0].hp = 50;
+    state = applyAction(state, "CHILD", "GUARD", steady);
+    const squirtle = activeFighter(state, "CHILD");
+    expect(squirtle.hp).toBe(50 + Math.round(squirtle.stats.hp * 0.03));
+  });
+
+  it("makes specials cheaper in space and keeps the weather clear", () => {
+    let state = themed("SPACE");
+    expect(state.weather).toBe("CLEAR");
+    expect(state.weatherUntil).toBeUndefined();
+    state.teams.CHILD.energy = 2;
+    expect(() => applyAction(state, "CHILD", "SPECIAL", steady)).not.toThrow();
+  });
+
+  it("cheers in the stadium on a super-effective hit", () => {
+    const state = themed("STADIUM", [mon("Squirtle", "Water")], [mon("Charmander", "Fire")]);
+    const after = applyAction(state, "CHILD", "ATTACK", steady);
+    expect(after.teams.CHILD.ult).toBe(15 + 10);
+    expect(after.events!.some((e) => e.fieldEvent === "CHEER")).toBe(true);
+  });
+
+  it("can freeze on hit at the snow peak", () => {
+    const state = themed("SNOWPEAK", [mon("Onix", "Rock")], [mon("Mew", "Normal")]);
+    // Rolls: evade no, crit no, spread, then the 10% freeze roll.
+    const after = applyAction(state, "CHILD", "ATTACK", script(0.99, 0.99, 0.5, 0.05));
+    expect(activeFighter(after, "PARENT").statuses.map((s) => s.kind)).toContain("FREEZE");
+  });
+
+  it("rolls at most two random field events, from round 3", () => {
+    let state = themed(undefined, [mon("Onix", "Rock")], [mon("Onix2", "Rock")]);
+    delete state.weatherUntil;
+    for (let i = 0; i < 30; i++) state = applyAction(state, state.turn, "GUARD", () => 0.01);
+    const events = state.events!.filter((e) => e.kind === "field");
+    expect(state.fieldEvents).toBe(2);
+    expect(events).toHaveLength(2);
+    expect(state.events!.find((e) => e.kind === "field")!.seq).toBeGreaterThan(0);
+  });
+
+  it("gives the gift to the side that's behind", () => {
+    let state = themed(undefined, [mon("A", "Rock")], [mon("B", "Rock")]);
+    delete state.weatherUntil;
+    state = guardRound(state);
+    state.teams.CHILD.fighters[0].hp = 10;
+    // Round 2 → 3: event chance roll 0.1 (< 0.2), kind roll 0.9 → GIFT.
+    state = applyAction(state, "CHILD", "GUARD", steady);
+    state = applyAction(state, "PARENT", "GUARD", script(0.1, 0.9));
+    expect(state.events!.find((e) => e.fieldEvent === "GIFT")).toMatchObject({ side: "CHILD" });
+  });
+});

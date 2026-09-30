@@ -563,3 +563,71 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .arena-items button { display: grid; gap: 2px; padding: 10px 8px; border: 2px solid #e2e8f0; border-radius: 14px; background: white; color: #0f172a; text-align: center; }
 .arena-items button.active { border-color: #6366f1; background: #eef2ff; }
 .arena-items button small { font-size: 10px; color: #64748b; }
+
+/* Arena themes: backdrop behind the fighter cards */
+.arena-stage { isolation: isolate; }
+.arena-stage > .arena-fighter, .arena-stage > .arena-vs { position: relative; z-index: 1; }
+.arena-backdrop { position: absolute; inset: -6px; z-index: 0; border-radius: 24px; pointer-events: none; opacity: .9; }
+.backdrop-volcano { background: radial-gradient(circle at 80% 110%, rgba(239, 68, 68, .45), transparent 55%), linear-gradient(180deg, #431407, #7c2d12 60%, #ea580c); }
+.backdrop-beach { background: linear-gradient(180deg, #7dd3fc, #bae6fd 45%, #38bdf8 46%, #0ea5e9 70%, #fde68a 71%, #fcd34d); }
+.backdrop-forest { background: radial-gradient(circle at 20% 20%, rgba(187, 247, 208, .5), transparent 40%), linear-gradient(180deg, #14532d, #166534 50%, #3f6212); }
+.backdrop-snowpeak { background: linear-gradient(160deg, #e0f2fe, #f8fafc 40%, #cbd5e1 41%, #e2e8f0 60%, #ffffff); }
+.backdrop-space { background: radial-gradient(1px 1px at 20% 30%, white, transparent), radial-gradient(1px 1px at 70% 20%, white, transparent), radial-gradient(2px 2px at 40% 70%, #c4b5fd, transparent), radial-gradient(1px 1px at 85% 60%, white, transparent), radial-gradient(1px 1px at 10% 85%, white, transparent), linear-gradient(180deg, #0f172a, #312e81); }
+.backdrop-stadium { background: repeating-linear-gradient(90deg, #166534 0 28px, #15803d 28px 56px); }
+.backdrop-stadium::before { content: "👥👥👥👥👥👥👥👥👥👥"; position: absolute; top: 4px; left: 0; right: 0; text-align: center; font-size: 14px; letter-spacing: 2px; opacity: .6; overflow: hidden; white-space: nowrap; }
+.arena-stage[class*="theme-"] .arena-vs { color: white; text-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.arena-stage[class*="theme-"] { padding: 8px; }
+.arena-theme-rule { flex-basis: 100%; color: #334155 !important; font-weight: 700; }
+.arena-theme-card { display: grid; gap: 3px; margin-bottom: 10px; padding: 12px 14px; border-radius: 16px; color: white; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+.arena-theme-card small { opacity: .95; }
+.arena-theme-card.theme-volcano { background: linear-gradient(135deg, #7c2d12, #ea580c); }
+.arena-theme-card.theme-beach { background: linear-gradient(135deg, #0284c7, #fbbf24); }
+.arena-theme-card.theme-forest { background: linear-gradient(135deg, #14532d, #65a30d); }
+.arena-theme-card.theme-snowpeak { background: linear-gradient(135deg, #64748b, #7dd3fc); }
+.arena-theme-card.theme-space { background: linear-gradient(135deg, #0f172a, #6d28d9); }
+.arena-theme-card.theme-stadium { background: linear-gradient(135deg, #166534, #ca8a04); }
+.arena-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.arena-themes button { display: grid; gap: 2px; padding: 10px 8px; border: 2px solid #e2e8f0; border-radius: 14px; background: white; color: #0f172a; text-align: left; }
+.arena-themes button small { font-size: 10px; color: #64748b; line-height: 1.3; }
+.arena-themes button.active { border-color: #6366f1; background: #eef2ff; }
+
+/* Animated weather over the stage */
+.arena-weather { position: absolute; inset: 0; z-index: 2; overflow: hidden; border-radius: 22px; pointer-events: none; }
+.arena-weather span { position: absolute; top: -10%; display: block; }
+.weather-rain span { width: 2px; height: 16px; background: linear-gradient(transparent, rgba(59, 130, 246, .7)); animation: wx-rain .8s linear infinite; }
+.weather-storm span { width: 2px; height: 18px; background: linear-gradient(transparent, rgba(99, 102, 241, .7)); animation: wx-rain .6s linear infinite; }
+.weather-storm::after { content: ""; position: absolute; inset: 0; background: white; opacity: 0; animation: wx-lightning 5s linear infinite; }
+.weather-snow span { width: 7px; height: 7px; border-radius: 50%; background: white; box-shadow: 0 0 4px rgba(148, 163, 184, .8); animation: wx-snow 4s linear infinite; }
+.weather-sand span { width: 30px; height: 2px; top: auto; background: rgba(180, 83, 9, .35); animation: wx-sand 1.6s linear infinite; }
+.weather-sand span:nth-child(odd) { top: 30%; } .weather-sand span:nth-child(even) { top: 70%; }
+.weather-sun::before { content: ""; position: absolute; top: -40%; right: -20%; width: 70%; height: 90%; background: radial-gradient(circle, rgba(253, 224, 71, .45), transparent 65%); animation: wx-sun 4s ease-in-out infinite; }
+.weather-sun span, .weather-clear span { display: none; }
+@keyframes wx-rain { to { transform: translate(-30px, 460px); } }
+@keyframes wx-snow { to { transform: translate(24px, 460px) rotate(180deg); } }
+@keyframes wx-sand { from { transform: translateX(-60px); } to { transform: translateX(520px); } }
+@keyframes wx-sun { 50% { opacity: .6; transform: scale(1.1); } }
+@keyframes wx-lightning { 0%, 91%, 94%, 100% { opacity: 0; } 92%, 95% { opacity: .55; } }
+
+/* Field events */
+.arena-field-fx { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; border-radius: 22px; }
+.arena-field-fx .meteor { position: absolute; left: 70%; font-size: 54px; animation: fx-meteor-foe .7s ease-in forwards; }
+.arena-field-fx.on-me .meteor { animation-name: fx-meteor-me; }
+@keyframes fx-meteor-foe { from { top: -30%; transform: translateX(80px) rotate(-30deg); } to { top: 18%; transform: translateX(-40px) scale(1.4); } }
+@keyframes fx-meteor-me { from { top: -30%; transform: translateX(80px) rotate(-30deg); } to { top: 65%; transform: translateX(-40px) scale(1.4); } }
+.arena-field-fx .bolt { position: absolute; left: 45%; font-size: 70px; animation: fx-bolt .6s steps(3) forwards; }
+.arena-field-fx.on-foe .bolt { top: 5%; } .arena-field-fx.on-me .bolt { top: 55%; }
+@keyframes fx-bolt { 0%, 60% { opacity: 1; transform: scale(1.4); filter: drop-shadow(0 0 16px #fde047); } 100% { opacity: 0; } }
+.arena-field-fx .rainbow { position: absolute; left: 50%; top: 40%; font-size: 120px; transform: translate(-50%, -50%); animation: fx-rainbow 1s ease forwards; }
+@keyframes fx-rainbow { from { opacity: 0; transform: translate(-50%, -30%) scale(.5); } 40% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); } to { opacity: 0; } }
+.arena-field-fx .gift { position: absolute; left: 50%; font-size: 48px; animation: fx-gift-foe .8s cubic-bezier(.3, 1.4, .5, 1) forwards; }
+.arena-field-fx.on-me .gift { animation-name: fx-gift-me; }
+@keyframes fx-gift-foe { from { top: -20%; } to { top: 20%; } }
+@keyframes fx-gift-me { from { top: -20%; } to { top: 62%; } }
+.arena-field-fx .lava { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(0deg, #dc2626, #f97316 50%, rgba(251, 146, 60, 0)); animation: fx-lava 1s ease forwards; }
+@keyframes fx-lava { 40% { height: 55%; } to { height: 0; opacity: 0; } }
+.arena-field-fx .crowd { position: absolute; left: 0; right: 0; bottom: 4%; text-align: center; font-size: 26px; letter-spacing: 4px; animation: fx-crowd .9s ease forwards; }
+@keyframes fx-crowd { 30% { transform: translateY(-14px); } 60% { transform: translateY(0); } 80% { transform: translateY(-8px); } to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .arena-weather, .arena-field-fx { display: none; }
+}

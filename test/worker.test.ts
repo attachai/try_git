@@ -711,6 +711,23 @@ describe("arena rooms", () => {
     expect((await post(`/api/arena/rooms/${room.code}/team`, kid, { childCharacterIds: ids, item: "BOGUS" })).status).toBe(409);
   });
 
+  it("uses the chosen arena theme, or rolls one", async () => {
+    const parent = await sessionCookie("parent");
+    const kid = await sessionCookie("child-user");
+    await post("/api/shop/purchase", kid, { characterId: "starter" });
+    const owned = await env.DB.prepare("SELECT id FROM child_characters WHERE character_id = 'starter'").first<{ id: string }>();
+    const space = await (await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: true, theme: "SPACE" })).json() as View & { room: { theme: string; weather: string } };
+    expect(space.room).toMatchObject({ theme: "SPACE", weather: "CLEAR" });
+    await post(`/api/arena/rooms/${space.room.code}/join`, kid, {});
+    const started = await (await post(`/api/arena/rooms/${space.room.code}/team`, kid, { childCharacterIds: [owned!.id] })).json() as { state: { theme: string } };
+    expect(started.state.theme).toBe("SPACE");
+    await post(`/api/arena/rooms/${space.room.code}/cancel`, parent, {});
+
+    const random = await (await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: true })).json() as { room: { theme: string } };
+    expect(["VOLCANO", "BEACH", "FOREST", "SNOWPEAK", "SPACE", "STADIUM"]).toContain(random.room.theme);
+    expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 0, autoParent: true, theme: "MOON" })).status).toBe(400);
+  });
+
   it("validates room settings", async () => {
     const parent = await sessionCookie("parent");
     expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 500, autoParent: false })).status).toBe(400);

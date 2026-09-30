@@ -3,7 +3,7 @@ import { usePlayback, type Display, type Float } from "./usePlayback";
 import { isMuted, setMuted, sfx } from "./sound";
 import { api } from "../../lib/api";
 import {
-  activeFighter, COMBOS, EMOTES, ENERGY_MAX, ITEMS, other, SPECIAL_COST, SPECIALS, STATUS_INFO, ULT_MAX, ULTIMATE_NAMES, ULTIMATE_POWER, ultOf,
+  activeFighter, COMBOS, EMOTES, ENERGY_MAX, ITEMS, other, specialCost, SPECIALS, THEMES, STATUS_INFO, ULT_MAX, ULTIMATE_NAMES, ULTIMATE_POWER, ultOf,
   WEATHER, weatherMultiplier,
   type Action, type Fighter, type Side, type Team,
 } from "../../../shared/arena";
@@ -101,6 +101,8 @@ export default function BattleView({ view, onView }: Props) {
   const autoPlays = me === "PARENT" && view.room.auto_parent;
   const myTurn = state.turn === me && !state.winner && !autoPlays;
   const special = specialText(myFighter);
+  const cost = specialCost(state);
+  const theme = state.theme ? THEMES[state.theme] : null;
   const advantage = typeMultiplier(myFighter.type_primary, foeFighter);
   const { display, fx, playing, log } = usePlayback(state, me);
   const [muted, setMutedState] = useState(isMuted);
@@ -197,15 +199,30 @@ export default function BattleView({ view, onView }: Props) {
       </div>
 
       <div className={"arena-field field-" + (state.weather ?? "CLEAR").toLowerCase()}>
-        <span>{field.icon} {field.label}</span>
+        <span>{theme ? theme.icon + " " + theme.label + " · " : ""}{field.icon} {field.label}</span>
         <small>
           {field.boost.length ? "ช่วย " + field.boost.map((type) => TYPE_ICON[type]).join("") + " +20%" : "ไม่มีผลกับธาตุ"}
           {field.weaken.length ? " · กด " + field.weaken.map((type) => TYPE_ICON[type]).join("") + " −20%" : ""}
           {state.weatherUntil ? " · เปลี่ยนในอีก " + Math.max(1, state.weatherUntil - state.round) + " รอบ" : ""}
         </small>
+        {theme && <small className="arena-theme-rule">📜 {theme.rule}</small>}
       </div>
 
-      <div className={"arena-stage " + fx.screen + (danger ? " danger" : "") + " stage-" + (state.weather ?? "CLEAR").toLowerCase()}>
+      <div className={"arena-stage " + fx.screen + (danger ? " danger" : "") + " stage-" + (state.weather ?? "CLEAR").toLowerCase() + (state.theme ? " theme-" + state.theme.toLowerCase() : "")}>
+        <div className={"arena-weather weather-" + (state.weather ?? "CLEAR").toLowerCase()} aria-hidden="true">
+          {Array.from({ length: 14 }, (_, i) => <span key={i} style={{ left: ((i * 29) % 100) + "%", animationDelay: ((i * 0.37) % 2).toFixed(2) + "s" }} />)}
+        </div>
+        {state.theme && <div className={"arena-backdrop backdrop-" + state.theme.toLowerCase()} aria-hidden="true" />}
+        {fx.field && (
+          <div className={"arena-field-fx fx-field-" + fx.field.kind.toLowerCase() + (fx.field.side === me ? " on-me" : " on-foe")} aria-hidden="true">
+            {fx.field.kind === "METEOR" && <span className="meteor">☄️</span>}
+            {fx.field.kind === "LIGHTNING" && <span className="bolt">⚡</span>}
+            {fx.field.kind === "RAINBOW" && <span className="rainbow">🌈</span>}
+            {fx.field.kind === "GIFT" && <span className="gift">🎁</span>}
+            {fx.field.kind === "LAVA" && <span className="lava" />}
+            {fx.field.kind === "CHEER" && <span className="crowd">{"🙌📣🎉👏🙌📣🎉👏"}</span>}
+          </div>
+        )}
         {intro >= 0 && intro < INTRO.length && (
           <div className="arena-intro" aria-live="assertive">
             {intro === 0 ? (
@@ -300,8 +317,8 @@ export default function BattleView({ view, onView }: Props) {
             <button disabled={!canAct || busy} onClick={() => act("ATTACK")}>
               <strong>⚔️ โจมตี</strong><small>อาจโดนหลบ</small>
             </button>
-            <button className="special" disabled={!canAct || busy || state.teams[me].energy < SPECIAL_COST} onClick={() => act("SPECIAL")}>
-              <strong>🌟 {special.name}</strong><small>⚡{SPECIAL_COST} · {special.detail}</small>
+            <button className="special" disabled={!canAct || busy || state.teams[me].energy < cost} onClick={() => act("SPECIAL")}>
+              <strong>🌟 {special.name}</strong><small>⚡{cost} · {special.detail}</small>
             </button>
             <button disabled={!canAct || busy} onClick={() => act("GUARD")}>
               <strong>🛡️ ตั้งรับ</strong><small>ลดครึ่ง · ⚡+1</small>

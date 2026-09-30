@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { TypeBadges } from "../TypeBadge";
+import { THEME_KINDS, THEMES, type ThemeKind } from "../../../shared/arena";
 import ArenaHistory from "./ArenaHistory";
 import BattleView from "./BattleView";
 import { DIFFICULTY_LABEL, useRoom, type RoomView } from "./useRoom";
@@ -20,6 +21,7 @@ export default function ArenaParent({ kids }: Props) {
   const [difficulty, setDifficulty] = useState<Difficulty>("NORMAL");
   const [prize, setPrize] = useState(50);
   const [autoParent, setAutoParent] = useState(false);
+  const [theme, setTheme] = useState<ThemeKind | "RANDOM">("RANDOM");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [historyChildId, setHistoryChildId] = useState("");
@@ -37,7 +39,7 @@ export default function ArenaParent({ kids }: Props) {
     try {
       setBusy(true);
       setMessage("");
-      setView(await api<RoomView>("/api/arena/rooms", { method: "POST", body: JSON.stringify({ difficulty, prize, autoParent }) }));
+      setView(await api<RoomView>("/api/arena/rooms", { method: "POST", body: JSON.stringify({ difficulty, prize, autoParent, theme }) }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "สร้างห้องไม่สำเร็จ");
     } finally {
@@ -85,6 +87,19 @@ export default function ArenaParent({ kids }: Props) {
             </div>
             <small className="muted">{DIFFICULTY_HINT[difficulty]}</small>
           </div>
+          <div>
+            <p className="arena-label">สนาม</p>
+            <div className="arena-themes">
+              <button type="button" className={theme === "RANDOM" ? "active" : ""} onClick={() => setTheme("RANDOM")}>
+                <strong>🎲 สุ่ม</strong><small>ลุ้นกันเลย</small>
+              </button>
+              {THEME_KINDS.map((kind) => (
+                <button type="button" key={kind} className={"theme-" + kind.toLowerCase() + (theme === kind ? " active" : "")} onClick={() => setTheme(kind)}>
+                  <strong>{THEMES[kind].icon} {THEMES[kind].label}</strong><small>{THEMES[kind].rule}</small>
+                </button>
+              ))}
+            </div>
+          </div>
           <label>
             รางวัลถ้าลูกชนะ (0-200 แต้ม)
             <input className="reason-input" type="number" inputMode="numeric" min={0} max={200} step={1} value={prize} onChange={(e) => setPrize(Number(e.target.value))} required />
@@ -107,6 +122,7 @@ export default function ArenaParent({ kids }: Props) {
     return (
       <section className="panel arena-lobby">
         <div className="section-heading"><h2>⚔️ ห้อง Arena</h2><span>{DIFFICULTY_LABEL[view.room.difficulty]} · ชนะได้ ⭐ {view.room.prize}</span></div>
+        {view.room.theme && <p className="arena-status">{THEMES[view.room.theme].icon} {THEMES[view.room.theme].label}</p>}
         <p className="muted">ให้ลูกกด "⚔️ Arena" แล้วใส่รหัสนี้</p>
         <div className="arena-code" aria-label={"รหัสห้อง " + view.room.code.split("").join(" ")}>{view.room.code}</div>
         <p className="arena-status">
