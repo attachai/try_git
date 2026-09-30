@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env, SELF } from "cloudflare:test";
+import { makeTeam, startBattle } from "../shared/arena";
 
 async function resetDb() {
   await env.DB.batch([
@@ -649,5 +650,72 @@ describe("arena rooms", () => {
     const parent = await sessionCookie("parent");
     expect((await post("/api/arena/rooms", parent, { difficulty: "EASY", prize: 500, autoParent: false })).status).toBe(400);
     expect((await post("/api/arena/rooms", await sessionCookie("child-user"), { difficulty: "EASY", prize: 0, autoParent: false })).status).toBe(403);
+  });
+});
+
+describe("arena history", () => {
+  const mon = (id: string, type_primary: string) => ({ id, name: id, image_url: "", rarity: "COMMON", type_primary, type_secondary: null });
+
+  // Oldest first: win, loss, win, win (EASY, NORMAL, HARD, NORMAL).
+  async function seedGames() {
+    const games = [
+      { winner: "CHILD", difficulty: "EASY", damage: [40, 0] },
+      { winner: "PARENT", difficulty: "NORMAL", damage: [10, 5] },
+      { winner: "CHILD", difficulty: "HARD", damage: [30, 60] },
+      { winner: "CHILD", difficulty: "NORMAL", damage: [50, 20] },
+    ];
+    for (const [index, game] of games.entries()) {
+      const state = startBattle(makeTeam([mon("Charmander", "Fire"), mon("Squirtle", "Water")]), makeTeam([mon("Onix", "Rock")]));
+      state.winner = game.winner as "CHILD" | "PARENT";
+      state.round = 5 + index;
+      state.teams.CHILD.fighters.forEach((fighter, i) => { fighter.damageDealt = game.damage[i]; });
+      await env.DB.prepare(
+        `INSERT INTO arena_rooms (id, code, parent_user_id, child_id, difficulty, prize, status, parent_team, state, winner, reward_points, updated_at)
+         VALUES (?, ?, 'parent', 'child', ?, 50, 'FINISHED', '[]', ?, ?, ?, datetime('now', ?))`,
+      ).bind("h" + index, "10" + index + "0", game.difficulty, JSON.stringify(state), game.winner, game.winner === "CHILD" ? 50 : 10, `-${10 - index} minutes`).run();
+    }
+  }
+
+  type History = {
+    summary: Record<string, number>;
+    by_difficulty: Record<string, { wins: number; losses: number }>;
+    top_monsters: { monster: { name: string }; battles: number; wins: number; damage: number; mvp: number }[];
+    recent: { code: string; winner: string; rounds: number; mvp: { name: string } | null; child_team: { name: string }[]; parent_team: { name: string }[] }[];
+  };
+  const history = async (cookie: string, query = "") =>
+    SELF.fetch("https://example.test/api/arena/history" + query, { headers: { cookie } });
+
+  it("summarizes a child's record, streaks, difficulties, and best monsters", async () => {
+    await seedGames();
+    const response = await history(await sessionCookie("child-user"));
+    expect(response.status).toBe(200);
+    const body = await response.json() as History;
+    expect(body.summary).toEqual({ played: 4, wins: 3, losses: 1, win_rate: 75, current_streak: 2, best_streak: 2 });
+    expect(body.by_difficulty).toEqual({ EASY: { wins: 1, losses: 0 }, NORMAL: { wins: 1, losses: 1 }, HARD: { wins: 1, losses: 0 } });
+    expect(body.top_monsters[0]).toMatchObject({ monster: { name: "Charmander" }, battles: 4, wins: 3, damage: 130, mvp: 2 });
+    expect(body.top_monsters[1]).toMatchObject({ monster: { name: "Squirtle" }, wins: 3, damage: 85, mvp: 1 });
+    expect(body.recent.map((game) => game.code)).toEqual(["1030", "1020", "1010", "1000"]);
+    expect(body.recent[0]).toMatchObject({ winner: "CHILD", rounds: 8, mvp: { name: "Charmander" } });
+    expect(body.recent[0].parent_team.map((m) => m.name)).toEqual(["Onix"]);
+  });
+
+  it("lets a parent see their child's history but not other children's", async () => {
+    await seedGames();
+    const parent = await sessionCookie("parent");
+    expect(((await (await history(parent, "?childId=child")).json()) as History).summary.played).toBe(4);
+    expect((await history(parent)).status).toBe(404);
+
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO families (id, name) VALUES ('fam_other', 'Other')"),
+      env.DB.prepare("INSERT INTO users (id, display_name, role) VALUES ('other-parent', 'Other', 'PARENT')"),
+      env.DB.prepare("INSERT INTO family_members (id, family_id, user_id, relation) VALUES ('fm-other', 'fam_other', 'other-parent', 'FATHER')"),
+    ]);
+    expect((await history(await sessionCookie("other-parent"), "?childId=child")).status).toBe(404);
+  });
+
+  it("returns an empty record before any battles", async () => {
+    const body = await (await history(await sessionCookie("child-user"))).json() as History;
+    expect(body.summary).toEqual({ played: 0, wins: 0, losses: 0, win_rate: 0, current_streak: 0, best_streak: 0 });
+    expect(body.recent).toEqual([]);
   });
 });
