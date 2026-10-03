@@ -8,6 +8,7 @@ import { TypeBadges } from "./components/TypeBadge";
 import { TYPE_INFO } from "../shared/types";
 import StatBlock, { LevelBar } from "./components/StatBlock";
 import ArenaParent from "./components/arena/ArenaParent";
+import Adventure from "./components/Adventure";
 import ArenaChild from "./components/arena/ArenaChild";
 import { api } from "./lib/api";
 import { ProfileAvatar, RELATION_LABEL } from "./components/ProfileLogin";
@@ -35,7 +36,7 @@ type CollectionItem = {
   evolution_cost?: number | null; evolution_name?: string | null; evolution_image_url?: string | null;
   level: number; xp: number;
 };
-type ChildTab = "home" | "shop" | "collection" | "pokedex" | "history" | "arena";
+type ChildTab = "home" | "shop" | "collection" | "pokedex" | "history" | "arena" | "adventure";
 type ParentTab = "home" | "quests" | "arena" | "history" | "family";
 type PendingAction =
   | { kind: "purchase"; character: ShopCharacter }
@@ -843,6 +844,12 @@ export default function App() {
               </button>
             )}
 
+            {isChild && childTab === "home" && (
+              <button className="arena-banner adventure-banner" onClick={() => setChildTab("adventure")}><span aria-hidden="true">🗺️</span><div><strong>การเดินทางของซาโตชิ</strong><small>120 ด่าน · 8 ภูมิภาค · เล่นเองวันละ 5 ครั้ง</small></div><span aria-hidden="true">›</span></button>
+            )}
+
+            {isChild && childTab === "adventure" && (<Adventure key={activeChild.id} childName={activeChild.display_name} onBack={() => setChildTab("home")} />)}
+
             {isChild && childTab === "arena" && (
               <ArenaChild collection={collection} onBack={() => setChildTab("home")} onFinished={refreshChildGame} />
             )}
@@ -1007,6 +1014,7 @@ export default function App() {
         {isChild ? (
           <>
             <button className={childTab === "home" ? "active" : ""} onClick={() => setChildTab("home")}><span>🏠</span>Home</button>
+            <button className={childTab === "adventure" ? "active" : ""} onClick={() => setChildTab("adventure")}><span>🗺️</span>ผจญภัย</button>
             <button className={childTab === "shop" ? "active" : ""} onClick={() => setChildTab("shop")}><span>🛍️</span>Shop</button>
             <button className={childTab === "collection" ? "active" : ""} onClick={() => setChildTab("collection")}><span>🎒</span>Collection</button>
             <button className={childTab === "pokedex" ? "active" : ""} onClick={() => setChildTab("pokedex")}><span>📖</span>สมุดสะสม</button>

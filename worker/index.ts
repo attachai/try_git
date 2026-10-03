@@ -6,6 +6,7 @@ import { collectionRoutes } from "./routes/collection";
 import { questRoutes } from "./routes/quests";
 import { gachaRoutes } from "./routes/gacha";
 import { pokedexRoutes } from "./routes/pokedex";
+import { adventureRoutes } from "./routes/adventure";
 import { arenaRoutes } from "./routes/arena";
 import type { Env } from "./types";
 import { error, json } from "./lib/http";
@@ -38,6 +39,8 @@ export default {
       response = (await gachaRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname === "/api/pokedex" || url.pathname === "/api/pokedex/claim") {
       response = (await pokedexRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
+    } else if (url.pathname === "/api/adventure" || url.pathname.startsWith("/api/adventure/")) {
+      response = (await adventureRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname.startsWith("/api/arena/")) {
       response = (await arenaRoutes(request, env, url.pathname)) ?? error(404, "NOT_FOUND", "Not found.");
     } else if (url.pathname === "/api/shop" || url.pathname === "/api/characters") {
