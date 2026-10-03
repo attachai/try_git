@@ -1160,3 +1160,63 @@ describe("shop evolution lines", () => {
     expect(characters.find((character) => character.id === "solo")!.evolutions).toEqual([]);
   });
 });
+
+describe("points history range", () => {
+  type History = {
+    history: { reason: string }[];
+    range: { from: string; to: string };
+    summary: { count: number; earned: number; spent: number };
+    truncated: boolean;
+  };
+  const DAY_MS = 24 * 3600 * 1000;
+  const thai = (offsetDays: number) => new Date(Date.now() + 7 * 3600 * 1000 + offsetDays * DAY_MS).toISOString().slice(0, 10);
+  // A UTC created_at for a Thailand-time day and hour.
+  const at = (day: string, thaiHour: number) =>
+    new Date(new Date(day + "T00:00:00+07:00").getTime() + thaiHour * 3600 * 1000).toISOString().replace("T", " ").slice(0, 19);
+
+  async function add(reason: string, points: number, createdAt: string) {
+    await env.DB.prepare(
+      `INSERT INTO point_transactions (id, child_id, created_by, transaction_type, points, reason, created_at)
+       VALUES (?, 'child', 'parent', ?, ?, ?, ?)`,
+    ).bind(crypto.randomUUID(), points > 0 ? "EARN" : "DEDUCT", points, reason, createdAt).run();
+  }
+  const load = async (query: string, user = "child-user") =>
+    SELF.fetch("https://example.test/api/children/child/history" + query, { headers: { cookie: await sessionCookie(user) } });
+
+  beforeEach(async () => {
+    await add("today", 50, at(thai(0), 1));
+    await add("six days ago", -20, at(thai(-6), 12));
+    // 00:30 Thailand time on day -6 is still day -6, though it's the previous day in UTC.
+    await add("early six days ago", 5, at(thai(-6), 0.5));
+    await add("seven days ago", 30, at(thai(-7), 23));
+    await add("twenty days ago", 40, at(thai(-20), 9));
+    await add("forty days ago", 70, at(thai(-40), 9));
+  });
+
+  it("defaults to the last 7 Thailand-time days, with totals", async () => {
+    const body = await (await load("")).json() as History;
+    expect(body.range).toEqual({ from: thai(-6), to: thai(0) });
+    expect(body.history.map((item) => item.reason)).toEqual(["today", "six days ago", "early six days ago"]);
+    expect(body.summary).toEqual({ count: 3, earned: 55, spent: 20 });
+    expect(body.truncated).toBe(false);
+  });
+
+  it("shows 30 days or a chosen range, and the parent sees the same", async () => {
+    const month = await (await load("?days=30", "parent")).json() as History;
+    expect(month.history.map((item) => item.reason)).toEqual(["today", "six days ago", "early six days ago", "seven days ago", "twenty days ago"]);
+
+    const chosen = await (await load(`?from=${thai(-45)}&to=${thai(-7)}`)).json() as History;
+    expect(chosen.range).toEqual({ from: thai(-45), to: thai(-7) });
+    expect(chosen.history.map((item) => item.reason)).toEqual(["seven days ago", "twenty days ago", "forty days ago"]);
+    expect(chosen.summary).toEqual({ count: 3, earned: 140, spent: 0 });
+
+    const oneDay = await (await load(`?from=${thai(-6)}&to=${thai(-6)}`)).json() as History;
+    expect(oneDay.history.map((item) => item.reason)).toEqual(["six days ago", "early six days ago"]);
+  });
+
+  it("rejects bad ranges", async () => {
+    for (const query of [`?from=${thai(0)}&to=${thai(-1)}`, `?from=${thai(-400)}&to=${thai(0)}`, "?from=2026-1-1&to=2026-01-05", `?from=${thai(-3)}`, "?days=0", "?days=1000", "?days=abc"]) {
+      expect((await load(query)).status, query).toBe(400);
+    }
+  });
+});
