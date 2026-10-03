@@ -874,7 +874,7 @@ export default function App() {
                   <div className="character-grid">
                     {collection.map((item) => (
                       <article className="character-card owned-card" key={item.child_character_id}>
-                        <div className="character-art image-art"><img src={item.image_url} alt={item.name} /></div>
+                        <div className="character-art image-art"><img src={item.image_url} alt={item.name} loading="lazy" /></div>
                         <div className="card-row"><h3>{item.name}</h3><span className={"rarity rarity-" + item.rarity.toLowerCase()}>{item.rarity}</span></div>
                         <div className="type-row"><TypeBadges primary={item.type_primary} secondary={item.type_secondary} /></div>
                         <LevelBar level={item.level} xp={item.xp} />
@@ -934,7 +934,7 @@ export default function App() {
                 <div className="character-grid">
                   {shownShop.map((character) => (
                     <article className="character-card" key={character.id}>
-                      <div className="character-art image-art"><img src={character.image_url} alt={character.name} /></div>
+                      <div className="character-art image-art"><img src={character.image_url} alt={character.name} loading="lazy" /></div>
                       <div className="card-row"><h3>{character.name}</h3><span className={"rarity rarity-" + character.rarity.toLowerCase()}>{character.rarity}</span></div>
                       <div className="type-row">
                         <TypeBadges primary={character.type_primary} secondary={character.type_secondary} />
