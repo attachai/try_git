@@ -5,6 +5,7 @@ import QuestBoard from "./components/QuestBoard";
 import GachaBox from "./components/GachaBox";
 import Pokedex from "./components/Pokedex";
 import { TypeBadges } from "./components/TypeBadge";
+import { TYPE_INFO } from "../shared/types";
 import StatBlock, { LevelBar } from "./components/StatBlock";
 import ArenaParent from "./components/arena/ArenaParent";
 import ArenaChild from "./components/arena/ArenaChild";
@@ -76,6 +77,10 @@ async function resizeAvatar(file: File) {
 const CUSTOM_AMOUNT_MIN = 10;
 const CUSTOM_AMOUNT_MAX = 1000;
 
+const RARITIES = ["COMMON", "RARE", "EPIC", "LEGENDARY"];
+const hasType = (character: { type_primary: string; type_secondary?: string | null }, type: string) =>
+  character.type_primary === type || character.type_secondary === type;
+
 // The forms a shop character evolves into, with the points each step costs.
 function EvolutionLine({ character }: { character: ShopCharacter }) {
   const forms = character.evolutions ?? [];
@@ -106,6 +111,8 @@ export default function App() {
   const [child, setChild] = useState<Child | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [shop, setShop] = useState<ShopCharacter[]>([]);
+  const [shopType, setShopType] = useState("");
+  const [shopRarity, setShopRarity] = useState("");
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [mode, setMode] = useState<"EARN" | "DEDUCT">("EARN");
   const [amount, setAmount] = useState(50);
@@ -135,6 +142,17 @@ export default function App() {
   const [pendingQuestCount, setPendingQuestCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
+
+  // Shop filters: element (primary or secondary type) and rarity. Counts on each chip
+  // reflect the other filter, so a chip never promises results that aren't there.
+  const shopTypes = useMemo(
+    () => Object.keys(TYPE_INFO).filter((type) => shop.some((character) => hasType(character, type))),
+    [shop],
+  );
+  const shownShop = useMemo(
+    () => shop.filter((character) => (!shopType || hasType(character, shopType)) && (!shopRarity || character.rarity === shopRarity)),
+    [shop, shopType, shopRarity],
+  );
 
   const activeChild = useMemo(
     () => (user?.role === "PARENT" ? children.find((c) => c.id === selectedChildId) ?? null : child),
@@ -837,9 +855,38 @@ export default function App() {
 
             {isChild && childTab === "shop" && (
               <section className="panel">
-                <div className="section-heading"><h2>Character Shop</h2><span>เลือกตัวที่ชอบ</span></div>
+                <div className="section-heading"><h2>Character Shop</h2><span>{shownShop.length === shop.length ? shop.length + " ตัว" : shownShop.length + " จาก " + shop.length + " ตัว"}</span></div>
+                <div className="shop-filters">
+                  <div className="shop-filter-row" role="group" aria-label="กรองตามระดับ">
+                    <button className={shopRarity === "" ? "active" : ""} onClick={() => setShopRarity("")}>ทุกระดับ</button>
+                    {RARITIES.map((rarity) => (
+                      <button key={rarity} className={"rarity-chip chip-" + rarity.toLowerCase() + (shopRarity === rarity ? " active" : "")} onClick={() => setShopRarity(shopRarity === rarity ? "" : rarity)}>
+                        {rarity} <small>{shop.filter((character) => character.rarity === rarity && (!shopType || hasType(character, shopType))).length}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="shop-filter-row types" role="group" aria-label="กรองตามธาตุ">
+                    <button className={shopType === "" ? "active" : ""} onClick={() => setShopType("")}>ทุกธาตุ</button>
+                    {shopTypes.map((type) => (
+                      <button
+                        key={type}
+                        className={shopType === type ? "active" : ""}
+                        onClick={() => setShopType(shopType === type ? "" : type)}
+                        // Keep the selected element in view in the sideways-scrolling row.
+                        ref={shopType === type ? (el) => { if (el?.parentElement) el.parentElement.scrollLeft = el.offsetLeft - el.parentElement.offsetLeft - 8; } : undefined}
+                      >
+                        {TYPE_INFO[type].icon} {TYPE_INFO[type].th} <small>{shop.filter((character) => hasType(character, type) && (!shopRarity || character.rarity === shopRarity)).length}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {shownShop.length === 0 && (
+                  <p className="muted shop-empty">
+                    ไม่มีตัวละครที่ตรงกับตัวกรอง <button className="link-button inline" onClick={() => { setShopType(""); setShopRarity(""); }}>ล้างตัวกรอง</button>
+                  </p>
+                )}
                 <div className="character-grid">
-                  {shop.map((character) => (
+                  {shownShop.map((character) => (
                     <article className="character-card" key={character.id}>
                       <div className="character-art image-art"><img src={character.image_url} alt={character.name} /></div>
                       <div className="card-row"><h3>{character.name}</h3><span className={"rarity rarity-" + character.rarity.toLowerCase()}>{character.rarity}</span></div>

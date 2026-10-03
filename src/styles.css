@@ -1001,3 +1001,20 @@ select { width: 100%; border: 1px solid #dbe2ea; border-radius: 14px; padding: 1
 .evo-form.rarity-ring-epic { box-shadow: 0 0 0 1.5px #c084fc; }
 .evo-form.rarity-ring-legendary { box-shadow: 0 0 0 1.5px #f59e0b; background: #fffbeb; }
 .evo-line.none { font-size: 11px; color: #94a3b8; font-weight: 700; }
+
+/* Shop filters */
+.shop-filters { display: grid; gap: 8px; margin-bottom: 14px; }
+.shop-filter-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop-filter-row.types { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.shop-filter-row button { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 7px 12px; border: 1px solid #e2e8f0; border-radius: 999px; background: white; color: #334155; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.shop-filter-row button small { font-size: 11px; color: #94a3b8; font-weight: 800; }
+.shop-filter-row button.active { border-color: #6366f1; background: #4f46e5; color: white; }
+.shop-filter-row button.active small { color: #c7d2fe; }
+.shop-filter-row .chip-rare { border-color: #93c5fd; color: #1d4ed8; }
+.shop-filter-row .chip-epic { border-color: #c084fc; color: #7c3aed; }
+.shop-filter-row .chip-legendary { border-color: #f59e0b; color: #b45309; background: #fffbeb; }
+.shop-filter-row .rarity-chip.active { color: white; }
+.shop-filter-row .chip-rare.active { background: #2563eb; border-color: #2563eb; }
+.shop-filter-row .chip-epic.active { background: linear-gradient(135deg, #7c3aed, #c026d3); border-color: #7c3aed; }
+.shop-filter-row .chip-legendary.active { background: linear-gradient(135deg, #f59e0b, #d97706); border-color: #d97706; }
+.shop-empty { text-align: center; }
