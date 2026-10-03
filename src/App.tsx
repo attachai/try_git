@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfirmDialog from "./components/ConfirmDialog";
 import ProfileLogin from "./components/ProfileLogin";
 import QuestBoard from "./components/QuestBoard";
 import GachaBox from "./components/GachaBox";
 import Pokedex from "./components/Pokedex";
 import { TypeBadges } from "./components/TypeBadge";
+import { TYPE_INFO } from "../shared/types";
 import StatBlock, { LevelBar } from "./components/StatBlock";
 import ArenaParent from "./components/arena/ArenaParent";
 import ArenaChild from "./components/arena/ArenaChild";
@@ -76,6 +77,28 @@ async function resizeAvatar(file: File) {
 const CUSTOM_AMOUNT_MIN = 10;
 const CUSTOM_AMOUNT_MAX = 1000;
 
+const RARITIES = ["COMMON", "RARE", "EPIC", "LEGENDARY"];
+
+type HistoryFilter = { mode: "7" | "30" | "custom"; from: string; to: string };
+type HistoryInfo = { range: { from: string; to: string }; summary: { count: number; earned: number; spent: number }; truncated: boolean };
+const THAILAND_OFFSET_MS = 7 * 60 * 60 * 1000;
+const thaiToday = () => new Date(Date.now() + THAILAND_OFFSET_MS).toISOString().slice(0, 10);
+const shiftDay = (day: string, delta: number) => {
+  const date = new Date(day + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+};
+const dayLabel = (day: string) => new Date(day + "T00:00:00+07:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+// D1 timestamps are UTC "YYYY-MM-DD HH:MM:SS".
+const timestampLabel = (value: string) => new Date(value.replace(" ", "T") + "Z").toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+function historyQuery(filter: HistoryFilter) {
+  if (filter.mode === "custom") return "?from=" + filter.from + "&to=" + filter.to;
+  return "?days=" + filter.mode;
+}
+const customRangeValid = (filter: HistoryFilter) => Boolean(filter.from && filter.to && filter.from <= filter.to);
+const hasType = (character: { type_primary: string; type_secondary?: string | null }, type: string) =>
+  character.type_primary === type || character.type_secondary === type;
+
 // The forms a shop character evolves into, with the points each step costs.
 function EvolutionLine({ character }: { character: ShopCharacter }) {
   const forms = character.evolutions ?? [];
@@ -106,6 +129,15 @@ export default function App() {
   const [child, setChild] = useState<Child | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [shop, setShop] = useState<ShopCharacter[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>({ mode: "7", from: "", to: "" });
+  const [historyInfo, setHistoryInfo] = useState<HistoryInfo | null>(null);
+  const [historyError, setHistoryError] = useState("");
+  // refreshHistory is called from many places; it always uses the latest filter and remembers the child.
+  const historyFilterRef = useRef(historyFilter);
+  historyFilterRef.current = historyFilter;
+  const historyTarget = useRef("");
+  const [shopType, setShopType] = useState("");
+  const [shopRarity, setShopRarity] = useState("");
   const [collection, setCollection] = useState<CollectionItem[]>([]);
   const [mode, setMode] = useState<"EARN" | "DEDUCT">("EARN");
   const [amount, setAmount] = useState(50);
@@ -136,6 +168,17 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [demoLoginEnabled, setDemoLoginEnabled] = useState(false);
 
+  // Shop filters: element (primary or secondary type) and rarity. Counts on each chip
+  // reflect the other filter, so a chip never promises results that aren't there.
+  const shopTypes = useMemo(
+    () => Object.keys(TYPE_INFO).filter((type) => shop.some((character) => hasType(character, type))),
+    [shop],
+  );
+  const shownShop = useMemo(
+    () => shop.filter((character) => (!shopType || hasType(character, shopType)) && (!shopRarity || character.rarity === shopRarity)),
+    [shop, shopType, shopRarity],
+  );
+
   const activeChild = useMemo(
     () => (user?.role === "PARENT" ? children.find((c) => c.id === selectedChildId) ?? null : child),
     [children, selectedChildId, child, user],
@@ -157,8 +200,26 @@ export default function App() {
   }
 
   async function refreshHistory(targetId: string) {
-    const data = await api<{ history: HistoryItem[] }>("/api/children/" + targetId + "/history");
+    historyTarget.current = targetId;
+    const filter = historyFilterRef.current;
+    if (filter.mode === "custom" && !customRangeValid(filter)) return;
+    const data = await api<{ history: HistoryItem[] } & HistoryInfo>("/api/children/" + targetId + "/history" + historyQuery(filter));
+    if (historyTarget.current !== targetId) return; // switched child meanwhile
     setHistory(data.history);
+    setHistoryInfo({ range: data.range, summary: data.summary, truncated: data.truncated });
+    setHistoryError("");
+  }
+
+  useEffect(() => {
+    if (!historyTarget.current) return;
+    refreshHistory(historyTarget.current).catch((error) => setHistoryError(error instanceof Error ? error.message : "โหลดประวัติไม่สำเร็จ"));
+  }, [historyFilter]);
+
+  function chooseHistoryMode(mode: HistoryFilter["mode"]) {
+    if (mode !== "custom") return setHistoryFilter({ ...historyFilter, mode });
+    // Start the custom range from what's on screen, so nothing jumps.
+    const today = thaiToday();
+    setHistoryFilter({ mode, from: historyFilter.from || historyInfo?.range.from || shiftDay(today, -6), to: historyFilter.to || today });
   }
 
   async function refreshChildGame() {
@@ -255,6 +316,9 @@ export default function App() {
     setChildren([]);
     setChild(null);
     setHistory([]);
+    setHistoryInfo(null);
+    setHistoryFilter({ mode: "7", from: "", to: "" });
+    historyTarget.current = "";
     setShop([]);
     setCollection([]);
     setMessage("");
@@ -837,9 +901,38 @@ export default function App() {
 
             {isChild && childTab === "shop" && (
               <section className="panel">
-                <div className="section-heading"><h2>Character Shop</h2><span>เลือกตัวที่ชอบ</span></div>
+                <div className="section-heading"><h2>Character Shop</h2><span>{shownShop.length === shop.length ? shop.length + " ตัว" : shownShop.length + " จาก " + shop.length + " ตัว"}</span></div>
+                <div className="shop-filters">
+                  <div className="shop-filter-row" role="group" aria-label="กรองตามระดับ">
+                    <button className={shopRarity === "" ? "active" : ""} onClick={() => setShopRarity("")}>ทุกระดับ</button>
+                    {RARITIES.map((rarity) => (
+                      <button key={rarity} className={"rarity-chip chip-" + rarity.toLowerCase() + (shopRarity === rarity ? " active" : "")} onClick={() => setShopRarity(shopRarity === rarity ? "" : rarity)}>
+                        {rarity} <small>{shop.filter((character) => character.rarity === rarity && (!shopType || hasType(character, shopType))).length}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="shop-filter-row types" role="group" aria-label="กรองตามธาตุ">
+                    <button className={shopType === "" ? "active" : ""} onClick={() => setShopType("")}>ทุกธาตุ</button>
+                    {shopTypes.map((type) => (
+                      <button
+                        key={type}
+                        className={shopType === type ? "active" : ""}
+                        onClick={() => setShopType(shopType === type ? "" : type)}
+                        // Keep the selected element in view in the sideways-scrolling row.
+                        ref={shopType === type ? (el) => { if (el?.parentElement) el.parentElement.scrollLeft = el.offsetLeft - el.parentElement.offsetLeft - 8; } : undefined}
+                      >
+                        {TYPE_INFO[type].icon} {TYPE_INFO[type].th} <small>{shop.filter((character) => hasType(character, type) && (!shopRarity || character.rarity === shopRarity)).length}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {shownShop.length === 0 && (
+                  <p className="muted shop-empty">
+                    ไม่มีตัวละครที่ตรงกับตัวกรอง <button className="link-button inline" onClick={() => { setShopType(""); setShopRarity(""); }}>ล้างตัวกรอง</button>
+                  </p>
+                )}
                 <div className="character-grid">
-                  {shop.map((character) => (
+                  {shownShop.map((character) => (
                     <article className="character-card" key={character.id}>
                       <div className="character-art image-art"><img src={character.image_url} alt={character.name} /></div>
                       <div className="card-row"><h3>{character.name}</h3><span className={"rarity rarity-" + character.rarity.toLowerCase()}>{character.rarity}</span></div>
@@ -859,7 +952,36 @@ export default function App() {
 
             {(showHistory || (user.role === "PARENT" && showHome)) && (
               <section className="panel">
-                <div className="section-heading"><h2>ประวัติล่าสุด</h2><span>{history.length} รายการ</span></div>
+                <div className="section-heading"><h2>ประวัติคะแนน</h2><span>{historyInfo?.summary.count ?? history.length} รายการ</span></div>
+                <div className="history-filter">
+                  <div className="segmented three" role="group" aria-label="ช่วงเวลา">
+                    <button className={historyFilter.mode === "7" ? "active" : ""} onClick={() => chooseHistoryMode("7")}>7 วัน</button>
+                    <button className={historyFilter.mode === "30" ? "active" : ""} onClick={() => chooseHistoryMode("30")}>30 วัน</button>
+                    <button className={historyFilter.mode === "custom" ? "active" : ""} onClick={() => chooseHistoryMode("custom")}>📅 เลือกช่วงวัน</button>
+                  </div>
+                  {historyFilter.mode === "custom" && (
+                    <div className="history-dates">
+                      <label>
+                        ตั้งแต่
+                        <input type="date" value={historyFilter.from} max={historyFilter.to || thaiToday()} onChange={(e) => setHistoryFilter({ ...historyFilter, from: e.target.value })} />
+                      </label>
+                      <label>
+                        ถึง
+                        <input type="date" value={historyFilter.to} min={historyFilter.from} max={thaiToday()} onChange={(e) => setHistoryFilter({ ...historyFilter, to: e.target.value })} />
+                      </label>
+                    </div>
+                  )}
+                  {historyFilter.mode === "custom" && !customRangeValid(historyFilter) && <p className="feedback">วันเริ่มต้องไม่เกินวันสุดท้าย</p>}
+                  {historyError && <p className="feedback">{historyError}</p>}
+                  {historyInfo && (
+                    <div className="history-summary">
+                      <span>📅 {historyInfo.range.from === historyInfo.range.to ? dayLabel(historyInfo.range.from) : dayLabel(historyInfo.range.from) + " – " + dayLabel(historyInfo.range.to)}</span>
+                      <span className="positive">ได้ +{historyInfo.summary.earned}</span>
+                      <span className="negative">ใช้ −{historyInfo.summary.spent}</span>
+                    </div>
+                  )}
+                </div>
+                {history.length === 0 && historyInfo && <p className="muted history-empty">ไม่มีรายการในช่วงนี้</p>}
                 <div className="timeline">
                   {history.map((item) => (
                     <article className="timeline-item" key={item.id}>
@@ -867,13 +989,14 @@ export default function App() {
                         <strong className={item.points > 0 ? "positive" : "negative"}>{item.points > 0 ? "+" : ""}{item.points}</strong>
                         <div>
                           <p>{item.reason}</p>
-                          <small>{item.created_by_name ?? "ระบบ"} · {new Date(item.created_at).toLocaleString("th-TH")}</small>
+                          <small>{item.created_by_name ?? "ระบบ"} · {timestampLabel(item.created_at)}</small>
                         </div>
                       </div>
                       <span className="type-badge">{item.transaction_type}</span>
                     </article>
                   ))}
                 </div>
+                {historyInfo?.truncated && <p className="muted history-empty">แสดง {history.length} รายการล่าสุด ลองเลือกช่วงวันให้สั้นลงเพื่อดูส่วนที่เหลือ</p>}
               </section>
             )}
           </>

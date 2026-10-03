@@ -57,7 +57,11 @@ Parent only.
 The API inserts the permanent ledger entry. D1 triggers apply the balance change atomically and reject any operation that would produce a negative balance.
 
 ### GET /api/children/:childId/history
-Parent may access children in their family. Child may access only their own history.
+Parent of the child, or the child themselves. Shows Thailand-time days:
+- `?days=N` (1–366): the last N days including today. The default is 7.
+- `?from=YYYY-MM-DD&to=YYYY-MM-DD`: an inclusive range of at most 366 days.
+
+Returns `history` (newest first, up to 500 rows), `truncated`, `range { from, to }`, and `summary { count, earned, spent }` for the whole range. An invalid range returns 400 `INVALID_RANGE`.
 
 ## Shop
 
