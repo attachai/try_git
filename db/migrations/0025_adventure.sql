@@ -23,21 +23,23 @@ CREATE TABLE adventure_records (
   stars INTEGER NOT NULL,
   PRIMARY KEY(child_id, stage_id)
 );
+-- Keep CASE out of trigger bodies: remote D1 splits a migration into statements
+-- itself and takes a CASE's END for the trigger's END ("incomplete input").
 -- Count starts, including losses, replays and abandoned battles. The trigger is
 -- atomic with INSERT, so parallel requests cannot exceed the daily allowance.
 CREATE TRIGGER adventure_start_guard BEFORE INSERT ON adventure_runs BEGIN
-  SELECT CASE WHEN (SELECT COUNT(*) FROM adventure_runs WHERE child_id = NEW.child_id AND day = NEW.day) >= 5
-    THEN RAISE(ABORT, 'ADVENTURE_DAILY_LIMIT') END;
-  SELECT CASE WHEN NEW.stage_id > COALESCE((SELECT cleared FROM adventure_progress WHERE child_id = NEW.child_id), 0) + 1
-    THEN RAISE(ABORT, 'ADVENTURE_LOCKED') END;
+  SELECT RAISE(ABORT, 'ADVENTURE_DAILY_LIMIT')
+    WHERE (SELECT COUNT(*) FROM adventure_runs WHERE child_id = NEW.child_id AND day = NEW.day) >= 5;
+  SELECT RAISE(ABORT, 'ADVENTURE_LOCKED')
+    WHERE NEW.stage_id > COALESCE((SELECT cleared FROM adventure_progress WHERE child_id = NEW.child_id), 0) + 1;
 END;
 -- Progress, first-clear XP and best stars commit with the winning state update.
 CREATE TRIGGER adventure_finish AFTER UPDATE OF status ON adventure_runs
 WHEN OLD.status = 'BATTLE' AND NEW.status = 'FINISHED' BEGIN
   INSERT INTO adventure_progress(child_id, cleared, xp) VALUES(NEW.child_id, 0, 0) ON CONFLICT DO NOTHING;
   UPDATE adventure_progress SET
-    xp = xp + CASE WHEN NEW.stars = 0 OR NEW.stage_id > cleared THEN NEW.xp ELSE 0 END,
-    cleared = MAX(cleared, CASE WHEN NEW.stars > 0 THEN NEW.stage_id ELSE 0 END)
+    xp = xp + IIF(NEW.stars = 0 OR NEW.stage_id > cleared, NEW.xp, 0),
+    cleared = MAX(cleared, IIF(NEW.stars > 0, NEW.stage_id, 0))
     WHERE child_id = NEW.child_id;
   INSERT INTO adventure_records(child_id, stage_id, stars)
     SELECT NEW.child_id, NEW.stage_id, NEW.stars WHERE NEW.stars > 0
