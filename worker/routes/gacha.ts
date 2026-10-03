@@ -7,7 +7,7 @@ export const GACHA_PRICE = 400;
 export const GACHA_DAILY_LIMIT = 3;
 // Relative weights. Rarities with nothing left for the child are skipped and
 // the rest renormalized, so the odds shown always match what the spin uses.
-export const GACHA_WEIGHTS: Record<string, number> = { COMMON: 60, RARE: 30, EPIC: 9, LEGENDARY: 1 };
+export const GACHA_WEIGHTS: Record<string, number> = { COMMON: 55, RARE: 35, EPIC: 7, LEGENDARY: 3 };
 
 type PoolCharacter = { id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary: string | null };
 
