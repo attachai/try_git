@@ -62,7 +62,7 @@ Parent may access children in their family. Child may access only their own hist
 ## Shop
 
 ### GET /api/shop
-Authenticated. Returns active purchasable characters. For a child session, each character includes an `owned` flag.
+Authenticated. Returns active purchasable characters. For a child session, each character includes an `owned` flag. Each character also has `evolutions`: every form it evolves into, in order (`id`, `name`, `image_url`, `rarity`, types, and the step's point `cost`), or `[]` for a single-stage character.
 
 ### POST /api/shop/purchase
 Child only.

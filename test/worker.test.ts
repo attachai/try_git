@@ -1139,3 +1139,24 @@ describe("arena parent-picked team", () => {
     expect((await get("/api/arena/characters?difficulty=EASY", await sessionCookie("child-user"))).status).toBe(403);
   });
 });
+
+describe("shop evolution lines", () => {
+  it("lists every form a shop character evolves into, in order, with each step's cost", async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO characters (id, name, slug, type_primary, type_secondary, image_url, price, rarity) VALUES ('final', 'Final', 'final', 'Fire', 'Flying', 'https://example.test/final.png', 0, 'EPIC')"),
+      env.DB.prepare("INSERT INTO evolution_paths (id, from_character_id, to_character_id, point_cost) VALUES ('evo2', 'evolved', 'final', 1000)"),
+      env.DB.prepare("INSERT INTO characters (id, name, slug, type_primary, image_url, price, rarity) VALUES ('solo', 'Solo', 'solo', 'Normal', 'https://example.test/solo.png', 500, 'RARE')"),
+    ]);
+    const response = await SELF.fetch("https://example.test/api/shop", { headers: { cookie: await sessionCookie("child-user") } });
+    const { characters } = await response.json() as { characters: { id: string; evolutions: { id: string; name: string; cost: number; rarity: string; type_secondary: string | null }[] }[] };
+    // Evolved forms aren't sold, only shown in the line.
+    expect(characters.map((character) => character.id).sort()).toEqual(["solo", "starter"]);
+    const starter = characters.find((character) => character.id === "starter")!;
+    expect(starter.evolutions.map(({ id, cost, rarity }) => ({ id, cost, rarity }))).toEqual([
+      { id: "evolved", cost: 300, rarity: "RARE" },
+      { id: "final", cost: 1000, rarity: "EPIC" },
+    ]);
+    expect(starter.evolutions[1].type_secondary).toBe("Flying");
+    expect(characters.find((character) => character.id === "solo")!.evolutions).toEqual([]);
+  });
+});
