@@ -437,10 +437,10 @@ describe("mystery box", () => {
   it("shows odds that add up to 100% over what is left", async () => {
     await addShopCharacters(2);
     const info = await (await get("/api/gacha", await sessionCookie("child-user"))).json() as { odds: { rarity: string; percent: number }[] };
-    // Pool has COMMON (starter) and RARE (extras) only, so 60:30 renormalizes to 66.7 / 33.3.
+    // Pool has COMMON (starter) and RARE (extras) only, so 55:35 renormalizes to 61.1 / 38.9.
     expect(info.odds).toEqual([
-      { rarity: "COMMON", percent: 66.7, count: 1 },
-      { rarity: "RARE", percent: 33.3, count: 2 },
+      { rarity: "COMMON", percent: 61.1, count: 1 },
+      { rarity: "RARE", percent: 38.9, count: 2 },
     ]);
   });
 

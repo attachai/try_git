@@ -116,7 +116,7 @@ Approval inserts an `EARN` ledger row with `reference_type = 'QUEST'`. A streak 
 
 ## Mystery box (กล่องสุ่ม)
 
-Child only. A spin costs 400 points, is limited to 3 per child per Thailand-time day, and always grants a shop character (`price > 0`) the child doesn't own, so there are no duplicates and no evolved forms. Rarity weights are COMMON 60, RARE 30, EPIC 9, LEGENDARY 1. Rarities with nothing left are skipped and the rest renormalized, and `GET /api/gacha` returns those effective odds.
+Child only. A spin costs 400 points, is limited to 3 per child per Thailand-time day, and always grants a shop character (`price > 0`) the child doesn't own, so there are no duplicates and no evolved forms. Rarity weights are COMMON 55, RARE 35, EPIC 7, LEGENDARY 3. Rarities with nothing left are skipped and the rest renormalized, and `GET /api/gacha` returns those effective odds.
 
 - `GET /api/gacha`: `price`, `daily_limit`, `spins_today`, `pool_size`, `odds`
 - `POST /api/gacha/spin`: `201 { character }`. Returns `429 DAILY_LIMIT`, `409 POOL_EMPTY`, `409 INSUFFICIENT_POINTS`, or `409 TRY_AGAIN` (a concurrent spin took the character; nothing was charged)
