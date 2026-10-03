@@ -26,6 +26,7 @@ type HistoryItem = {
 type ShopCharacter = {
   id: string; name: string; slug: string; type_primary: string; type_secondary?: string | null;
   image_url: string; price: number; rarity: string; owned: number;
+  evolutions?: { id: string; name: string; image_url: string; rarity: string; type_primary: string; type_secondary: string | null; cost: number }[];
 };
 type CollectionItem = {
   child_character_id: string; character_id: string; name: string; slug: string;
@@ -74,6 +75,29 @@ async function resizeAvatar(file: File) {
 }
 const CUSTOM_AMOUNT_MIN = 10;
 const CUSTOM_AMOUNT_MAX = 1000;
+
+// The forms a shop character evolves into, with the points each step costs.
+function EvolutionLine({ character }: { character: ShopCharacter }) {
+  const forms = character.evolutions ?? [];
+  if (forms.length === 0) return <p className="evo-line none">✨ ร่างเดียว ไม่มีวิวัฒนาการ</p>;
+  return (
+    <div className="evo-line" aria-label={"วิวัฒนาการเป็น " + forms.map((form) => form.name).join(" แล้วเป็น ")}>
+      <small>🔄 วิวัฒนาการได้ {forms.length} ขั้น</small>
+      <ol>
+        {forms.map((form) => (
+          <li key={form.id}>
+            <span className="evo-arrow">⬇ <em>ใช้ ⭐{form.cost}</em></span>
+            <span className={"evo-form rarity-ring-" + form.rarity.toLowerCase()}>
+              <img src={form.image_url} alt="" loading="lazy" />
+              <strong>{form.name}</strong>
+              <TypeBadges primary={form.type_primary} secondary={form.type_secondary} iconOnly />
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -822,6 +846,7 @@ export default function App() {
                       <div className="type-row">
                         <TypeBadges primary={character.type_primary} secondary={character.type_secondary} />
                       </div>
+                      <EvolutionLine character={character} />
                       <StatBlock monster={character} showMatchups={false} />
                       <button disabled={Boolean(character.owned) || busy} className="buy-button" onClick={() => setPendingAction({ kind: "purchase", character })}>
                         {character.owned ? "มีแล้ว ✓" : "ซื้อ · ⭐ " + character.price}
